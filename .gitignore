@@ -20,7 +20,7 @@ htmlcov/
 !.env.example
 
 # Données (licence CC BY-NC-SA : jamais redistribuées, récupérées par `make data`)
-data/
+/data/
 *.csv
 *.parquet
 

@@ -2,20 +2,26 @@
 # Les URLs et secrets ne vont PAS ici : voir .env.example.
 
 data:
-  hf_repo_id: Aneeshers/tennis-sackmann-archive
-  # À figer sur un sha de commit en phase 1 (reproductibilité).
-  hf_revision: main
-  allow_patterns:
-    - atp/atp_matches_[12]*.csv
-    - atp/atp_rankings_*.csv
-    - atp/atp_players.csv
-    - atp/UPSTREAM_README.md
-  raw_dir: data/raw
+  raw_dir: data/raw                   # ignoré par Git (licence CC BY-NC-SA : pas de redistribution)
+  lock_file: configs/data.lock.json   # révisions résolues + SHA-256 de chaque fichier (versionné)
+  first_match_year: 2010
+  last_match_year: 2026               # 2026 est partiel côté source (jusqu'à fin mai)
+  # Ordre = priorité. La 2e source n'est utilisée que si la 1re est injoignable ;
+  # une différence de contenu, elle, est toujours bloquante (SHA-256 du lock).
+  sources:
+    - kind: huggingface
+      repo: Aneeshers/tennis-sackmann-archive
+      revision: main
+      subdir: atp
+    - kind: github
+      repo: Aneeshers/tennis-sackmann-archive
+      revision: main
+      subdir: atp
 
 simulation:
   bootstrap_start: 2010-01-01   # historique disponible dès le départ
   replay_start: 2015-01-01      # début du rejeu : le temps simulé avance à partir d'ici
-  replay_end: 2024-12-31
+  replay_end: 2026-05-31        # dernier tournoi disponible dans la source
 
 demo:
   sleep_s: 0.0                  # > 0 pour ralentir les tasks et les rendre visibles dans l'UI Prefect

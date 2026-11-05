@@ -14,6 +14,7 @@ lancement au lieu d'être ignorée silencieusement.
 from __future__ import annotations
 
 from datetime import date
+from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
@@ -23,6 +24,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "project.yaml"
+FIRST_ATP_YEAR = 1968
 
 
 class Settings(BaseSettings):
@@ -42,17 +44,56 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class DataConfig(_StrictModel):
-    """Provenance des données brutes."""
+def resolve_path(path: Path, root: Path = PROJECT_ROOT) -> Path:
+    """Rend un chemin de configuration absolu, relativement à la racine du projet."""
+    return path if path.is_absolute() else root / path
 
-    hf_repo_id: str
-    hf_revision: str = Field(min_length=1, description="Révision Hugging Face figée (sha ou tag)")
-    allow_patterns: tuple[str, ...] = Field(min_length=1)
+
+class SourceKind(StrEnum):
+    """Hébergeurs du dataset supportés."""
+
+    HUGGINGFACE = "huggingface"
+    GITHUB = "github"
+
+
+class SourceConfig(_StrictModel):
+    """Un emplacement d'où télécharger les fichiers bruts. L'ordre dans la liste définit le fallback."""
+
+    kind: SourceKind
+    repo: str = Field(pattern=r"^[\w.-]+/[\w.-]+$", description="propriétaire/nom")
+    revision: str = Field(default="main", min_length=1, description="Branche, tag ou sha à résoudre")
+    subdir: str = "atp"
+    timeout_s: float = Field(default=60.0, gt=0)
+
+    @property
+    def name(self) -> str:
+        """Identifiant stable de la source, utilisé comme clé dans le fichier de verrouillage."""
+        return f"{self.kind.value}:{self.repo}"
+
+
+class DataConfig(_StrictModel):
+    """Provenance et périmètre des données brutes."""
+
     raw_dir: Path
+    lock_file: Path
+    first_match_year: int = Field(ge=FIRST_ATP_YEAR)
+    last_match_year: int
+    sources: tuple[SourceConfig, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_years(self) -> Self:
+        if self.first_match_year > self.last_match_year:
+            msg = "attendu : first_match_year <= last_match_year"
+            raise ValueError(msg)
+        return self
 
     def resolved_raw_dir(self, root: Path = PROJECT_ROOT) -> Path:
         """Chemin absolu du dossier des données brutes."""
-        return self.raw_dir if self.raw_dir.is_absolute() else root / self.raw_dir
+        return resolve_path(self.raw_dir, root)
+
+    def resolved_lock_file(self, root: Path = PROJECT_ROOT) -> Path:
+        """Chemin absolu du fichier de verrouillage des données."""
+        return resolve_path(self.lock_file, root)
 
 
 class SimulationConfig(_StrictModel):
@@ -82,6 +123,16 @@ class ProjectConfig(_StrictModel):
     data: DataConfig
     simulation: SimulationConfig
     demo: DemoConfig = DemoConfig()
+
+    @model_validator(mode="after")
+    def _check_simulation_within_data(self) -> Self:
+        if not (
+            self.data.first_match_year <= self.simulation.bootstrap_start.year
+            and self.simulation.replay_end.year <= self.data.last_match_year
+        ):
+            msg = "la fenêtre de simulation doit être couverte par les années de matchs téléchargées"
+            raise ValueError(msg)
+        return self
 
     @classmethod
     def from_yaml(cls, path: Path = DEFAULT_CONFIG_PATH) -> Self:

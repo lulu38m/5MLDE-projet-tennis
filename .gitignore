@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Outils
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets : seul .env.example est versionné
+.env
+.env.*
+!.env.example
+
+# Données (licence CC BY-NC-SA : jamais redistribuées, récupérées par `make data`)
+data/
+*.csv
+*.parquet
+
+# Traces locales des outils MLOps
+mlruns/
+mlartifacts/
+state/
+loadtest/results/*.csv
+
+# Document de pilotage personnel (non versionné)
+PLAN.md
+
+# Éditeurs / OS
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,21 @@
+# Configuration de l'expérience (versionnée, tracée dans MLflow).
+# Les URLs et secrets ne vont PAS ici : voir .env.example.
+
+data:
+  hf_repo_id: Aneeshers/tennis-sackmann-archive
+  # À figer sur un sha de commit en phase 1 (reproductibilité).
+  hf_revision: main
+  allow_patterns:
+    - atp/atp_matches_[12]*.csv
+    - atp/atp_rankings_*.csv
+    - atp/atp_players.csv
+    - atp/UPSTREAM_README.md
+  raw_dir: data/raw
+
+simulation:
+  bootstrap_start: 2010-01-01   # historique disponible dès le départ
+  replay_start: 2015-01-01      # début du rejeu : le temps simulé avance à partir d'ici
+  replay_end: 2024-12-31
+
+demo:
+  sleep_s: 0.0                  # > 0 pour ralentir les tasks et les rendre visibles dans l'UI Prefect

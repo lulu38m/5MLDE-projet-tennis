@@ -5,12 +5,14 @@ Règles :
 - une source **injoignable** → on passe à la suivante (fallback), avec un avertissement dans les logs ;
 - un contenu **différent** du verrou → arrêt immédiat (`DataIntegrityError`), quelle que soit la source ;
 - un fichier local déjà conforme au verrou n'est pas re-téléchargé (cache) ;
-- un fichier n'est déplacé à sa place définitive qu'une fois vérifié (jamais de fichier à moitié écrit).
+- un fichier n'est déplacé à sa place définitive qu'une fois vérifié (jamais de fichier à moitié écrit) ;
+- tout fichier est rendu lisible par tous (montage en lecture seule dans les conteneurs non-root).
 """
 
 from __future__ import annotations
 
 import logging
+import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +26,7 @@ from tennis_mlops.data.sources import DataSource
 logger = logging.getLogger(__name__)
 
 MANIFEST_NAME = "manifest.json"
+READ_FOR_ALL = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,20 +98,7 @@ class RawDataDownloader:
         if self._lock is None:
             msg = "pas de fichier de verrouillage : lancer `make data-lock`"
             raise DataIntegrityError(msg)
-        problems: list[str] = []
-        records: dict[str, FileRecord] = {}
-        for name in self._catalog.names():
-            path = self._raw_dir / name
-            if not path.is_file():
-                problems.append(f"{name} manquant")
-                continue
-            records[name] = FileRecord.of(path)
-            try:
-                self._lock.verify(name, records[name])
-            except DataIntegrityError as exc:
-                problems.append(str(exc))
-        if problems:
-            raise DataIntegrityError("; ".join(problems))
+        self._lock.verify_directory(self._raw_dir, self._catalog.names())
         return RawManifest.load(self.manifest_path)
 
     def _download_from(self, source: DataSource) -> DownloadReport:
@@ -145,7 +135,10 @@ class RawDataDownloader:
             return None
         record = FileRecord.of(target)
         expected = self._lock.files.get(name)
-        return record if expected is not None and expected.sha256 == record.sha256 else None
+        if expected is None or expected.sha256 != record.sha256:
+            return None
+        make_world_readable(target)
+        return record
 
     def _fetch_verified(self, source: DataSource, name: str, revision: str, target: Path) -> FileRecord:
         partial = target.with_name(target.name + ".part")
@@ -158,4 +151,16 @@ class RawDataDownloader:
             partial.unlink(missing_ok=True)
             raise
         partial.replace(target)
+        make_world_readable(target)
         return record
+
+
+def make_world_readable(path: Path) -> None:
+    """Ajoute la lecture pour tous : les conteneurs (utilisateur non-root, uid 10001) lisent `data/raw` en montage.
+
+    Les données sont publiques (licence CC BY-NC-SA) : aucune raison de les réserver à leur propriétaire. Certains
+    outils créent leurs fichiers en mode 600, ce qui fait échouer le démarrage de `mock_source` dans Docker.
+    """
+    mode = path.stat().st_mode
+    if mode & READ_FOR_ALL != READ_FOR_ALL:
+        path.chmod(mode | READ_FOR_ALL)

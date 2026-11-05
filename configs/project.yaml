@@ -23,5 +23,14 @@ simulation:
   replay_start: 2015-01-01      # début du rejeu : le temps simulé avance à partir d'ici
   replay_end: 2026-05-31        # dernier tournoi disponible dans la source
 
+mock_source:
+  first_round_notice_days: 2    # le tableau (1er tour) est connu 2 jours avant le début du tournoi
+  tournament_notice_days: 14    # un tournoi apparaît dans le calendrier 14 jours avant
+  fixture_horizon_days: 7       # horizon par défaut de GET /fixtures
+  pauses:
+    - start: 2020-03-09
+      end: 2020-08-21
+      reason: "Circuit ATP suspendu (COVID-19) entre Acapulco/Dubaï et la reprise à New York"
+
 demo:
   sleep_s: 0.0                  # > 0 pour ralentir les tasks et les rendre visibles dans l'UI Prefect

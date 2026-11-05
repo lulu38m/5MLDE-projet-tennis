@@ -11,3 +11,7 @@ class SourceUnavailableError(DataError):
 
 class DataIntegrityError(DataError):
     """Le contenu ne correspond pas au fichier de verrouillage : bloquant, jamais de fallback silencieux."""
+
+
+class DataAccessError(DataError):
+    """Les fichiers existent mais ne sont pas lisibles par le processus (droits, utilisateur du conteneur)."""

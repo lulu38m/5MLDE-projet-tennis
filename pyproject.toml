@@ -5,6 +5,7 @@ description = "Projet final 5MLDE — chaîne MLOps de prédiction du vainqueur 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi==0.162.0",
     "httpx==0.28.1",
     "httpx2==2.16.0",
     "huggingface-hub==2.4.0",
@@ -13,6 +14,7 @@ dependencies = [
     "pydantic==2.14.3",
     "pydantic-settings==2.16.2",
     "pyyaml==6.0.3",
+    "uvicorn==0.54.0",
 ]
 
 [dependency-groups]
@@ -79,12 +81,17 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "integration: nécessite la stack docker compose (exclu par défaut en CI)",
+    "data: utilise les vraies données de data/raw (ignoré automatiquement si `make data` n'a pas été lancé)",
 ]
 
 [tool.coverage.run]
-source = ["tennis_mlops"]
+source = ["tennis_mlops", "mock_source"]
 branch = true
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+
+[tool.uv.build-backend]
+# Deux paquets dans le même projet : la chaîne MLOps et le simulateur de source (service séparé).
+module-name = ["tennis_mlops", "mock_source"]

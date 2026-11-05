@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -106,6 +106,24 @@ class DataLock(_FileSet):
         if expected.sha256 != actual.sha256:
             msg = f"{name} : SHA-256 {actual.sha256[:12]}… ≠ attendu {expected.sha256[:12]}…"
             raise DataIntegrityError(msg)
+
+    def verify_directory(self, directory: Path, names: Sequence[str]) -> dict[str, FileRecord]:
+        """Vérifie tous les fichiers `names` d'un dossier ; lève une seule erreur listant tous les problèmes."""
+        problems: list[str] = []
+        records: dict[str, FileRecord] = {}
+        for name in names:
+            path = directory / name
+            if not path.is_file():
+                problems.append(f"{name} manquant")
+                continue
+            records[name] = FileRecord.of(path)
+            try:
+                self.verify(name, records[name])
+            except DataIntegrityError as exc:
+                problems.append(str(exc))
+        if problems:
+            raise DataIntegrityError("; ".join(problems))
+        return records
 
 
 class RawManifest(_FileSet):

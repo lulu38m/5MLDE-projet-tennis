@@ -1,6 +1,6 @@
 # Point d'entrée unique des commandes du projet. `make help` liste les cibles.
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck test check clean
+.PHONY: help setup lint format typecheck test check clean data data-lock data-verify data-profile
 
 UV := uv run --locked
 
@@ -26,6 +26,18 @@ test: ## Lance les tests unitaires avec couverture
 	$(UV) pytest -m "not integration" --cov --cov-report=term-missing
 
 check: lint typecheck test ## Tout ce que la CI vérifie
+
+data: ## Télécharge les données brutes à la version verrouillée (configs/data.lock.json)
+	$(UV) python -m tennis_mlops.data download
+
+data-verify: ## Vérifie les fichiers locaux contre le verrou (SHA-256)
+	$(UV) python -m tennis_mlops.data verify
+
+data-profile: ## Profile les données brutes → data/raw/profile.json
+	$(UV) python -m tennis_mlops.data profile
+
+data-lock: ## (Mainteneurs) Résout les révisions actuelles des sources et régénère le verrou
+	$(UV) python -m tennis_mlops.data lock
 
 clean: ## Supprime les caches locaux
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov

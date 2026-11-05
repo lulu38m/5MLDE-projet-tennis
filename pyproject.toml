@@ -5,6 +5,11 @@ description = "Projet final 5MLDE — chaîne MLOps de prédiction du vainqueur 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "httpx==0.28.1",
+    "httpx2==2.16.0",
+    "huggingface-hub==2.4.0",
+    "numpy==2.2.6",
+    "pandas==2.2.3",
     "pydantic==2.14.3",
     "pydantic-settings==2.16.2",
     "pyyaml==6.0.3",
@@ -13,6 +18,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy==2.4.1",
+    "pandas-stubs==2.2.3.250527",
     "pre-commit==4.7.0",
     "pytest==9.2.0",
     "pytest-cov==7.1.0",

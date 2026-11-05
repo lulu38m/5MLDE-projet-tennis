@@ -7,8 +7,9 @@ Deux sources, deux responsabilités :
 - `ProjectConfig` : ce qui décrit l'expérience (données, simulation, démo). Lu depuis `configs/*.yaml`,
   versionné dans Git et tracé dans MLflow.
 
-Les deux modèles refusent les clés inconnues : une faute de frappe dans la configuration fait échouer le
-lancement au lieu d'être ignorée silencieusement.
+`ProjectConfig` refuse les clés inconnues : une faute de frappe dans le YAML fait échouer le lancement au lieu
+d'être ignorée silencieusement. `Settings` ignore en revanche les variables qui ne la concernent pas, car le même
+`.env` sert à tous les services de la stack (`MOCK_*` pour le simulateur, `TENNIS_*` pour la chaîne MLOps…).
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ FIRST_ATP_YEAR = 1968
 class Settings(BaseSettings):
     """Paramètres d'environnement : où sont les services et avec quels identifiants."""
 
-    model_config = SettingsConfigDict(env_prefix="TENNIS_", env_file=".env", extra="forbid", frozen=True)
+    model_config = SettingsConfigDict(env_prefix="TENNIS_", env_file=".env", extra="ignore", frozen=True)
 
     mlflow_tracking_uri: HttpUrl = HttpUrl("http://localhost:7281")
     prefect_api_url: HttpUrl = HttpUrl("http://localhost:4200/api")
@@ -111,6 +112,30 @@ class SimulationConfig(_StrictModel):
         return self
 
 
+class PauseConfig(_StrictModel):
+    """Période sans tournoi connue, expliquée par `mock_source` quand on l'interroge."""
+
+    start: date
+    end: date
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_order(self) -> Self:
+        if self.start > self.end:
+            msg = "pause : start doit précéder end"
+            raise ValueError(msg)
+        return self
+
+
+class MockSourceConfig(_StrictModel):
+    """Règles de visibilité du simulateur de source."""
+
+    first_round_notice_days: int = Field(default=2, ge=0, le=14, description="Tableau publié N jours avant")
+    tournament_notice_days: int = Field(default=14, ge=0, le=90, description="Tournoi visible N jours avant")
+    fixture_horizon_days: int = Field(default=7, ge=1, le=30, description="Horizon par défaut de /fixtures")
+    pauses: tuple[PauseConfig, ...] = ()
+
+
 class DemoConfig(_StrictModel):
     """Réglages qui rendent la démo lisible, sans effet sur les résultats."""
 
@@ -122,6 +147,7 @@ class ProjectConfig(_StrictModel):
 
     data: DataConfig
     simulation: SimulationConfig
+    mock_source: MockSourceConfig = MockSourceConfig()
     demo: DemoConfig = DemoConfig()
 
     @model_validator(mode="after")

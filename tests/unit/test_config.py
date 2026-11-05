@@ -114,3 +114,10 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert str(settings.mock_source_url) == "http://mock:9000/"
     assert settings.teams_webhook_url is not None
     assert "example.invalid" not in repr(settings)  # le secret n'apparaît jamais dans les logs
+
+
+def test_shared_env_file_with_other_services_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MOCK_PORT=8001\nTENNIS_API_URL=http://api:9000\n", encoding="utf-8")
+    settings = Settings(_env_file=env_file)
+    assert str(settings.api_url) == "http://api:9000/"

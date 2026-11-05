@@ -118,3 +118,23 @@ def test_verify_requires_a_lock(tmp_path: Path) -> None:
 def test_at_least_one_source_is_required(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="source"):
         RawDataDownloader(CATALOG, [], tmp_path)
+
+
+class PrivateFileSource(InMemorySource):
+    """Écrit ses fichiers en mode 600, comme certains caches de téléchargement."""
+
+    def fetch(self, filename: str, revision: str, destination: Path) -> None:
+        super().fetch(filename, revision, destination)
+        destination.chmod(0o600)
+
+
+def test_downloaded_and_reused_files_are_world_readable(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    lock = lock_for(CONTENTS, tmp_path)
+    make_downloader(raw, PrivateFileSource("hf", CONTENTS), lock=lock).download()
+    assert all((raw / name).stat().st_mode & 0o444 == 0o444 for name in CATALOG.names())
+
+    (raw / "atp_players.csv").chmod(0o600)  # fichier déjà présent mais privé
+    report = make_downloader(raw, InMemorySource("hf", CONTENTS), lock=lock).download()
+    assert "atp_players.csv" in report.reused
+    assert (raw / "atp_players.csv").stat().st_mode & 0o444 == 0o444

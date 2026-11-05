@@ -1,0 +1,31 @@
+# Stack locale du projet. Les services s'ajoutent phase par phase (postgres, mlflow, prefect, api, grafana…).
+# Ports publiés sur 127.0.0.1 uniquement : rien n'est exposé sur le réseau.
+name: tennis-mlops
+
+x-app: &app
+  build: .
+  image: tennis-mlops:local
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  mock_source:
+    <<: *app
+    command: ["python", "-m", "mock_source"]
+    ports:
+      - "127.0.0.1:${MOCK_SOURCE_PORT:-8001}:8001"
+    volumes:
+      # Données téléchargées par `make data`, vérifiées contre configs/data.lock.json au démarrage.
+      - ./data/raw:/app/data/raw:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g

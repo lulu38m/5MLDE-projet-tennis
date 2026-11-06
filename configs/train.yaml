@@ -1,0 +1,51 @@
+# Campagne d'entraînement (versionnée, tracée dans MLflow avec la config résolue).
+# Les URLs des services ne vont PAS ici : voir .env.example (TENNIS_MLFLOW_TRACKING_URI…).
+
+experiment: atp-winner          # expérience MLflow : un run parent « campagne », un run enfant par candidat
+registered_model: atp-winner    # nom stable dans le registre ; chaque campagne y ajoute une version
+seed: 42
+
+split:
+  train_start: 2011-01-01       # 2010 sert d'échauffement : Elo, forme et face-à-face partent tous de zéro
+  validation_months: 6          # sert à CHOISIR le meilleur candidat
+  test_months: 6                # bilan final sur les mois les plus récents ; jamais utilisé pour choisir
+  min_rows: 300                 # en dessous, la partition est trop petite : la campagne est refusée
+
+features:                       # paramètres du FeatureBuilder (FEATURES_VERSION tracée à côté)
+  elo_start: 1500
+  elo_k_numerator: 250          # K = 250 / (matchs joués + 5) ^ 0,4 : un nouveau joueur bouge vite, un ancien peu
+  elo_k_offset: 5
+  elo_k_shape: 0.4
+  surface_weight: 0.5           # proba Elo = moitié Elo global, moitié Elo de la surface
+  form_window: 10               # forme = taux de victoire lissé sur les 10 derniers matchs
+  activity_days: 365
+  max_rest_days: 365
+
+selection_metric: log_loss      # mesurée sur la validation ; plus bas = meilleur
+workers: 4                      # candidats entraînés en parallèle (1 = séquentiel, pour mesurer le gain)
+
+# Grille d'hyperparamètres : chaque combinaison devient un candidat, donc un run MLflow enfant.
+candidates:
+  - model: logistic_regression
+    grid:
+      C: [0.05, 1.0]
+  - model: hist_gradient_boosting
+    grid:
+      learning_rate: [0.03, 0.1]
+      max_depth: [3, 6]
+      max_iter: [300]
+  - model: random_forest
+    grid:
+      n_estimators: [200]
+      max_depth: [8, 14]
+      min_samples_leaf: [20]
+
+evaluation:
+  calibration_bins: 10          # ECE et courbe de calibration
+  permutation_rows: 2000        # importance des features par permutation, sur un échantillon de la validation
+  permutation_repeats: 5
+  latency_calls: 200            # appels d'une ligne pour la latence p50 / p95
+  latency_batch_rows: 1000      # et un appel de 1 000 lignes
+  worst_predictions: 50         # les plus grosses surprises du test, en CSV
+  min_segment_rows: 30          # un segment plus petit n'est pas évalué (métriques trop instables)
+  rank_gap_edges: [10, 50, 200] # tranches d'écart de classement : 0-10, 10-50, 50-200, 200+

@@ -121,3 +121,34 @@ def test_archive_separates_accepted_and_quarantined_lots(tmp_path: Path, lot: Lo
     assert envelope["endpoint"] == "/tournaments/2019-0001/results"
     assert envelope["data"]["expected_matches"] == 7
     assert json.loads((refused / "validation.json").read_text())["success"] is False
+
+
+def test_training_reads_matches_and_lot_provenance(store: IngestionStore, lot: Lot) -> None:
+    empty = store.lots_summary()
+    assert (empty["lots_valid"], empty["last_valid_lot"], empty["watermark"]) == (0, None, None)
+    store.save_valid_lot(lot, OK, "state/lots/2019-0001", "run-1")
+    store.save_quarantined_lot(replace(lot, lot_id="2019-0002"), KO, "state/quarantine/2019-0002", "run-1")
+    store.set_watermark(date(2019, 1, 14))
+    frame = store.matches_frame()
+    assert len(frame) == 7
+    assert {"match_id", "winner_rank", "dataset_version"} <= set(frame.columns)
+    summary = store.lots_summary()
+    assert (summary["lots_valid"], summary["lots_quarantined"]) == (1, 1)
+    assert summary["last_valid_lot"] == "2019-0001"
+    assert summary["watermark"] == "2019-01-14"
+
+
+def test_too_short_text_columns_are_widened(store: IngestionStore) -> None:
+    engine = store._engine
+    metadata.drop_all(engine)
+    narrow = sa.MetaData()
+    sa.Table("ingestion_lots", narrow, sa.Column("lot_id", sa.String(80), primary_key=True),
+             sa.Column("tourney_id", sa.String(32)))  # fmt: skip
+    narrow.create_all(engine)
+    assert ("ingestion_lots", "tourney_id", 64) in store.widenings()
+    store.create_schema()
+    if engine.dialect.name == "postgresql":
+        assert store.widenings() == []
+        with engine.begin() as conn:
+            conn.execute(sa.text("INSERT INTO ingestion_lots (lot_id, tourney_id) VALUES ('x', :t)"),
+                         {"t": "2016-M-DC-2016-G1-AM-M-BAR-ECU-01"})  # fmt: skip

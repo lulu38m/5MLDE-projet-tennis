@@ -16,8 +16,9 @@ qualité, le réentraînement, la mise en service et la supervision.
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # stack Docker : mock_source, PostgreSQL, Prefect (`make urls` affiche les adresses)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow (`make urls` affiche les adresses)
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
+make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
 ```
 
 ## Commandes
@@ -40,11 +41,14 @@ make ingest     # un passage d'ingestion contrôlé par Great Expectations, suiv
 | `make clock [DATE=2019-06-01]` | Lit ou règle l'horloge simulée |
 | `make advance DAYS=7` | Fait avancer le temps simulé |
 | `make chaos MODE=503 FAILURES=2` | Incident contrôlé (`off`, `503`, `slow`, `corrupt`, `schema`) |
-| `make urls` | Adresses des interfaces (mock_source, Prefect, PostgreSQL, rapports GX) |
+| `make urls` | Adresses des interfaces (mock_source, Prefect, MLflow, PostgreSQL, rapports GX) |
 | `make ingest` | Un passage d'ingestion : mock_source → Great Expectations → PostgreSQL |
 | `make lots` | Derniers lots ingérés : statut, volumes, contrôles en échec |
 | `make gx-docs` | Rapports HTML de Great Expectations |
 | `make db` | Console SQL sur la base du projet |
+| `make train [WORKERS=8]` | Campagne d'entraînement : grille de candidats en parallèle, MLflow, registre |
+| `make train-seq` | La même campagne, un candidat à la fois (référence pour mesurer le gain du parallélisme) |
+| `make mlflow` | Ouvre l'interface MLflow |
 
 ## Organisation du code
 
@@ -53,11 +57,13 @@ make ingest     # un passage d'ingestion contrôlé par Great Expectations, suiv
 | `src/tennis_mlops/` | Chaîne MLOps (package installable, typé) |
 | `src/tennis_mlops/ingestion/` | Client HTTP de la source, lots, stockage PostgreSQL, archive brute |
 | `src/tennis_mlops/validation/` | Suites Great Expectations et expectations custom |
-| `src/tennis_mlops/flows/` | Flows Prefect |
+| `src/tennis_mlops/features/` | `FeatureBuilder` : features calculées avant chaque match, partagées entraînement / API |
+| `src/tennis_mlops/training/` | Jeu de données, découpage temporel, pipelines, évaluation, suivi MLflow, registre |
+| `src/tennis_mlops/flows/` | Flows Prefect (`ingest.py`, `train.py`) |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence, profil), `MOCK_SOURCE.md` (API de rejeu), `INGESTION.md` (flow, contrôles) |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md` |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -118,3 +124,22 @@ backoff), contrôle chaque lot avec Great Expectations puis stocke dans PostgreS
 - **Source en panne** : retries, puis état « Dégradé » sans perte ; les données déjà ingérées restent utilisables.
 
 Déroulé, contrôles, incidents et démo : [`docs/INGESTION.md`](docs/INGESTION.md).
+
+## Entraînement
+
+Le flow Prefect `entrainement-atp` rejoue l'historique validé pour calculer les features de chaque match **avec
+l'état de la veille** (classement, Elo global et par surface, forme, face-à-face…), découpe le temps en
+entraînement / validation / test, puis entraîne une grille de candidats **en parallèle** (une task Prefect par
+méthode : `DatasetBuilder.build` → `TemporalSplitter.split` → `PipelineFactory.create` → `Trainer.fit` →
+`Evaluator.evaluate` → `Reporter.log` → `Registrar.register`).
+
+- **MLflow** : un run parent par campagne (données, config, baselines, comparaison), un run enfant par candidat
+  (métriques globales et par segment, coûts, graphiques, fiche modèle, pipeline complet rechargeable).
+- **Lecture rapide** : chaque run a son rapport HTML dans l'onglet « Artifacts » (`rapport.html`,
+  `rapport_campagne.html`) ; l'onglet « Model metrics » range les métriques par section et trace la performance
+  mois par mois et les courbes d'apprentissage.
+- **Choix** sur la validation, **bilan** sur le test, comparé aux baselines Elo et classement.
+- **Registre** : le candidat retenu devient une nouvelle version de `atp-winner` (`lifecycle=candidate`) ; la mise
+  en service (alias `production`) est l'objet de la phase 5.
+
+Features, protocole, traçabilité et mesures : [`docs/ENTRAINEMENT.md`](docs/ENTRAINEMENT.md).

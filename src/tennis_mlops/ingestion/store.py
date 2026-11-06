@@ -52,7 +52,8 @@ matches = sa.Table(
     "matches",
     metadata,
     sa.Column("match_id", sa.String(64), primary_key=True),
-    sa.Column("tourney_id", sa.String(32), nullable=False, index=True),
+    # Jusqu'à 35 caractères dans la source (Coupe Davis : « 2016-M-DC-2016-G1-AM-M-BAR-ECU-01 »).
+    sa.Column("tourney_id", sa.String(64), nullable=False, index=True),
     sa.Column("tourney_name", sa.String(120)),
     sa.Column("tourney_level", sa.String(4), index=True),
     sa.Column("surface", sa.String(16)),
@@ -76,7 +77,7 @@ lots = sa.Table(
     metadata,
     sa.Column("lot_id", sa.String(80), primary_key=True),
     sa.Column("kind", sa.String(16), nullable=False),
-    sa.Column("tourney_id", sa.String(32)),
+    sa.Column("tourney_id", sa.String(64)),
     sa.Column("tourney_level", sa.String(4)),
     sa.Column("status", sa.String(16), nullable=False, index=True),
     sa.Column("rows_received", sa.Integer(), nullable=False),
@@ -154,8 +155,31 @@ class IngestionStore:
         return cls(sa.create_engine(url, pool_pre_ping=True))
 
     def create_schema(self) -> None:
-        """Crée les tables manquantes (idempotent)."""
+        """Crée les tables manquantes et élargit les colonnes devenues trop courtes (idempotent)."""
         metadata.create_all(self._engine)
+        for table, column, length in self.widenings():
+            if self._engine.dialect.name == "postgresql":  # SQLite ne contrôle pas la longueur des VARCHAR
+                with self._engine.begin() as conn:
+                    conn.execute(sa.text(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE VARCHAR({length})'))
+
+    def widenings(self) -> list[tuple[str, str, int]]:
+        """Colonnes texte plus courtes en base que dans le schéma déclaré : (table, colonne, nouvelle longueur).
+
+        Élargir un VARCHAR ne perd aucune donnée : c'est la seule migration faite automatiquement (une base créée
+        en phase 3 avait `tourney_id` en 32 caractères, trop court pour la Coupe Davis).
+        """
+        inspector = sa.inspect(self._engine)
+        plan = []
+        for table in metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            current = {c["name"]: getattr(c["type"], "length", None) for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                wanted = getattr(column.type, "length", None)
+                have = current.get(column.name)
+                if wanted and have and have < wanted:
+                    plan.append((table.name, column.name, int(wanted)))
+        return plan
 
     # ------------------------------------------------------------------ watermark
 
@@ -207,6 +231,32 @@ class IngestionStore:
         """Nombre de matchs stockés."""
         with self._engine.connect() as conn:
             return int(conn.execute(sa.select(sa.func.count()).select_from(matches)).scalar_one())
+
+    def matches_frame(self) -> pd.DataFrame:
+        """Tous les matchs validés, pour l'entraînement (quelques Mo : 47 000 matchs au plus)."""
+        with self._engine.connect() as conn:
+            return pd.DataFrame(conn.execute(sa.select(matches)).mappings().all(), columns=list(matches.columns.keys()))
+
+    def lots_summary(self) -> dict[str, Any]:
+        """Provenance du jeu d'entraînement : lots valides / en quarantaine, dernier lot validé, watermark."""
+        with self._engine.connect() as conn:
+            grouped = conn.execute(sa.select(lots.c.status, sa.func.count()).group_by(lots.c.status)).all()
+            counts = {str(status): int(n) for status, n in grouped}
+            last = conn.execute(
+                sa.select(lots.c.lot_id, lots.c.end_date, lots.c.docs_index)
+                .where(lots.c.status == LotStatus.VALID)
+                .order_by(lots.c.end_date.desc().nulls_last(), lots.c.updated_at.desc())
+                .limit(1)
+            ).one_or_none()
+            watermark = conn.execute(sa.select(state.c.value).where(state.c.key == WATERMARK_KEY)).scalar_one_or_none()
+        return {
+            "lots_valid": int(counts.get(LotStatus.VALID, 0)),
+            "lots_quarantined": int(counts.get(LotStatus.QUARANTINED, 0)),
+            "last_valid_lot": last.lot_id if last else None,
+            "last_valid_lot_end": last.end_date.isoformat() if last and last.end_date else None,
+            "last_valid_lot_docs": last.docs_index if last else None,
+            "watermark": watermark,
+        }
 
     # ------------------------------------------------------------------ référence de dérive
 

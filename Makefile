@@ -3,7 +3,7 @@
 .PHONY: help setup lint format typecheck test check clean \
         data data-lock data-verify data-profile \
         up down logs ps urls mock clock advance chaos \
-        ingest lots gx-docs db
+        ingest lots gx-docs db train train-seq mlflow
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -12,9 +12,12 @@ MODE ?= off
 FAILURES ?=
 DELAY ?=
 DATE ?=
+WORKERS ?=
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
+# Pas de « conseils pour agents » de MLflow dans les logs.
+export MLFLOW_DISABLE_AGENT_HINT := 1
 GX_DOCS := state/gx/gx/uncommitted/data_docs/local_site/index.html
 
 help: ## Affiche cette aide
@@ -73,6 +76,7 @@ ps: ## État des services
 urls: ## Adresses des interfaces de la stack
 	@echo "mock_source (docs API) : http://127.0.0.1:8001/docs"
 	@echo "Prefect (UI)           : http://127.0.0.1:4201"
+	@echo "MLflow (UI)            : http://127.0.0.1:7282"
 	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
 	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
 
@@ -108,6 +112,17 @@ gx-docs: ## Ouvre les rapports HTML de Great Expectations (Data Docs)
 
 db: ## Console SQL sur la base du projet
 	docker compose exec postgres psql -U tennis -d tennis
+
+# --------------------------------------------------------------------------- entraînement
+
+train: ## Campagne d'entraînement en parallèle (configs/train.yaml), suivie dans Prefect et MLflow ; `WORKERS=8`
+	$(UV) python -m tennis_mlops.flows.train $(if $(WORKERS),--workers $(WORKERS))
+
+train-seq: ## Même campagne, un candidat à la fois : la référence pour mesurer le gain du parallélisme
+	$(UV) python -m tennis_mlops.flows.train --workers 1
+
+mlflow: ## Ouvre l'interface MLflow
+	$(UV) python -m webbrowser -t "http://127.0.0.1:7282"
 
 comma := ,
 

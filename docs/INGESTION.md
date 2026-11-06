@@ -85,7 +85,9 @@ référence. Un écart est tracé (`warnings`) sans bloquer : un tournoi atypiqu
 | `state/gx/` | Contexte Great Expectations et Data Docs |
 
 Un lot validé est écrit en une transaction (matchs + trace). Réécrire un lot déjà stocké n'ajoute rien
-(idempotence par `match_id`) : une reprise est toujours sans risque.
+(idempotence par `match_id`) : une reprise est toujours sans risque. Au démarrage, une colonne texte plus courte en
+base que dans le schéma est élargie (seule migration automatique, sans perte) : `tourney_id` passe de 32 à 64
+caractères pour la Coupe Davis (`2016-M-DC-2016-G1-AM-M-BAR-ECU-01`).
 
 Les classements hebdomadaires ne sont pas ingérés à part : chaque match porte déjà le classement et les points des
 deux joueurs au début du tournoi, ce dont l'entraînement a besoin.
@@ -104,4 +106,5 @@ make chaos MODE=slow DELAY=15 && make ingest  # timeouts (10 s) puis retries
 make chaos MODE=off
 ```
 
-Pour la quarantaine, `make` affiche `Error 2` : c'est l'échec attendu, visible aussi dans Prefect.
+`make` affiche `Error 1` pour une quarantaine et `Error 2` pour l'état « Dégradé » : ce sont les codes de sortie
+attendus (tableau ci-dessus), visibles aussi dans Prefect.

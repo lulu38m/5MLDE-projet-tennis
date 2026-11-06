@@ -1,4 +1,4 @@
-# Image unique du projet : mock_source aujourd'hui, puis l'API, le worker Prefect et l'interface.
+# Image unique du projet : mock_source, le serveur MLflow, puis l'API, le worker Prefect et l'interface.
 # Dépendances installées depuis uv.lock (--locked) : l'image est reproductible.
 FROM python:3.12.12-slim-bookworm
 
@@ -28,7 +28,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 # Les données ne sont jamais dans l'image (licence) : montées en lecture seule dans /app/data/raw.
-RUN useradd --create-home --uid 10001 app && mkdir -p /app/data/raw && chown -R app /app/data
+# /var/lib/mlflow appartient à l'utilisateur non-root : un volume nommé monté là hérite de ces droits.
+RUN useradd --create-home --uid 10001 app && mkdir -p /app/data/raw /var/lib/mlflow \
+    && chown -R app /app/data /var/lib/mlflow
 USER app
 
 EXPOSE 8001

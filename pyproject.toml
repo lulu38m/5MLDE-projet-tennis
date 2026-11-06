@@ -10,6 +10,8 @@ dependencies = [
     "httpx==0.28.1",
     "httpx2==2.16.0",
     "huggingface-hub==2.4.0",
+    "matplotlib==3.10.3",
+    "mlflow==3.16.1",
     "numpy==2.2.6",
     "pandas==2.2.3",
     "prefect==3.8.7",
@@ -17,6 +19,7 @@ dependencies = [
     "pydantic==2.14.3",
     "pydantic-settings==2.16.2",
     "pyyaml==6.0.3",
+    "scikit-learn==1.6.1",
     "sqlalchemy==2.0.44",
     "uvicorn==0.54.0",
 ]
@@ -79,6 +82,11 @@ plugins = ["pydantic.mypy"]
 module = ["great_expectations.*", "prefect.*"]
 implicit_reexport = true
 
+[[tool.mypy.overrides]]
+# scikit-learn et skops ne publient pas d'annotations de types (ni stubs ni py.typed).
+module = ["sklearn.*", "skops.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -88,6 +96,12 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+filterwarnings = [
+    # Bruit de dépendances tierces, sans lien avec notre code :
+    "ignore:.*deprecated - use:DeprecationWarning",                     # pyparsing, via matplotlib
+    "ignore:Unknown solver options:scipy.optimize.OptimizeWarning",     # scikit-learn 1.6 avec SciPy 1.18
+    "ignore:starlette.middleware.wsgi is deprecated:DeprecationWarning", # serveur MLflow
+]
 markers = [
     "integration: nécessite la stack docker compose (exclu par défaut en CI)",
     "data: utilise les vraies données de data/raw (ignoré automatiquement si `make data` n'a pas été lancé)",

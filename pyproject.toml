@@ -5,15 +5,19 @@ description = "Projet final 5MLDE — chaîne MLOps de prédiction du vainqueur 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.162.0",
+    "fastapi==0.141.1",
+    "great-expectations==1.23.2",
     "httpx==0.28.1",
     "httpx2==2.16.0",
     "huggingface-hub==2.4.0",
     "numpy==2.2.6",
     "pandas==2.2.3",
+    "prefect==3.8.7",
+    "psycopg[binary]==3.3.8",
     "pydantic==2.14.3",
     "pydantic-settings==2.16.2",
     "pyyaml==6.0.3",
+    "sqlalchemy==2.0.44",
     "uvicorn==0.54.0",
 ]
 
@@ -69,6 +73,11 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# GX et Prefect exposent leurs classes publiques sans les réexporter explicitement.
+module = ["great_expectations.*", "prefect.*"]
+implicit_reexport = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

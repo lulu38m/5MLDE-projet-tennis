@@ -16,7 +16,8 @@ qualité, le réentraînement, la mise en service et la supervision.
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # démarre la stack Docker (pour l'instant : mock_source sur http://127.0.0.1:8001/docs)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect (`make urls` affiche les adresses)
+make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 ```
 
 ## Commandes
@@ -39,21 +40,29 @@ make up         # démarre la stack Docker (pour l'instant : mock_source sur htt
 | `make clock [DATE=2019-06-01]` | Lit ou règle l'horloge simulée |
 | `make advance DAYS=7` | Fait avancer le temps simulé |
 | `make chaos MODE=503 FAILURES=2` | Incident contrôlé (`off`, `503`, `slow`, `corrupt`, `schema`) |
+| `make urls` | Adresses des interfaces (mock_source, Prefect, PostgreSQL, rapports GX) |
+| `make ingest` | Un passage d'ingestion : mock_source → Great Expectations → PostgreSQL |
+| `make lots` | Derniers lots ingérés : statut, volumes, contrôles en échec |
+| `make gx-docs` | Rapports HTML de Great Expectations |
+| `make db` | Console SQL sur la base du projet |
 
 ## Organisation du code
 
 | Dossier | Contenu |
 |---|---|
 | `src/tennis_mlops/` | Chaîne MLOps (package installable, typé) |
+| `src/tennis_mlops/ingestion/` | Client HTTP de la source, lots, stockage PostgreSQL, archive brute |
+| `src/tennis_mlops/validation/` | Suites Great Expectations et expectations custom |
+| `src/tennis_mlops/flows/` | Flows Prefect |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | Documentation : `DONNEES.md` (provenance, licence, profil), `MOCK_SOURCE.md` (API de rejeu) |
+| `docs/` | `DONNEES.md` (provenance, licence, profil), `MOCK_SOURCE.md` (API de rejeu), `INGESTION.md` (flow, contrôles) |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
-La configuration est séparée en deux : `configs/*.yaml` décrit l'expérience (tracée dans MLflow), les
-variables `TENNIS_*` décrivent l'environnement. Les deux refusent les clés inconnues.
+La configuration est séparée en deux : `configs/*.yaml` décrit l'expérience (tracée dans MLflow, clés inconnues
+refusées), les variables `TENNIS_*` / `MOCK_*` décrivent l'environnement (un seul `.env` partagé par les services).
 
 ## Qualité de code
 
@@ -95,3 +104,17 @@ joueurs qualifiés. Les incidents (`503`, `slow`, `corrupt`, `schema`) servent �
 contrôles qualité bloquants.
 
 Endpoints, règles du rejeu et incidents : [`docs/MOCK_SOURCE.md`](docs/MOCK_SOURCE.md).
+
+## Ingestion et contrôles qualité
+
+Le flow Prefect `ingestion-atp` tire les tournois terminés depuis `mock_source` (une task par appel HTTP, retries avec
+backoff), contrôle chaque lot avec Great Expectations puis stocke dans PostgreSQL ce qui passe, en une transaction.
+
+- **Bloquant** : schéma, domaines de valeurs et 4 expectations custom (score lisible, vainqueur ≠ perdant, aucun
+  match dans le futur, volume = tableau).
+- **Surveillance** (non bloquant) : dérive de l'écart de classement, comparée aux tournois du même niveau.
+- **Lot refusé** : quarantaine (`state/quarantine/`), flow `Failed`, rien n'est stocké pour ce lot, reprise au
+  passage suivant.
+- **Source en panne** : retries, puis état « Dégradé » sans perte ; les données déjà ingérées restent utilisables.
+
+Déroulé, contrôles, incidents et démo : [`docs/INGESTION.md`](docs/INGESTION.md).

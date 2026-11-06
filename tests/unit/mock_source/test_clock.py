@@ -3,8 +3,7 @@ from datetime import date
 import pytest
 
 from mock_source.clock import ClockOutOfRangeError, SimulatedClock
-
-from .conftest import FakeTime
+from tests.support.mock_world import FakeTime
 
 LOWER, UPPER = date(2015, 1, 1), date(2015, 12, 31)
 

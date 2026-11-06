@@ -32,5 +32,13 @@ mock_source:
       end: 2020-08-21
       reason: "Circuit ATP suspendu (COVID-19) entre Acapulco/Dubaï et la reprise à New York"
 
+ingestion:
+  http_timeout_s: 10            # au-delà, l'appel compte comme un échec (chaos `slow`)
+  retries: 3                    # nouveaux essais sur panne (503, timeout, connexion) ; jamais sur 4xx
+  retry_delays_s: [1, 2, 4]     # backoff exponentiel entre les essais
+  state_dir: state              # zone brute, quarantaine, rapports Great Expectations (hors Git)
+  drift_min_history: 20         # tournois de même niveau nécessaires pour surveiller la dérive
+  drift_quantiles: [0.005, 0.995]
+
 demo:
   sleep_s: 0.0                  # > 0 pour ralentir les tasks et les rendre visibles dans l'UI Prefect

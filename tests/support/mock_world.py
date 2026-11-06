@@ -1,4 +1,4 @@
-"""Mini-dataset synthétique dont toutes les dates sont connues à l'avance.
+"""Monde simulé partagé par les tests : mini-dataset synthétique dont toutes les dates sont connues à l'avance.
 
 - `2019-0001` Alpha Open (ATP 250, 8 joueurs, début 2019-01-07) : QF le 07/01, SF le 10/01, F le 13/01
 - `2019-D001` Coupe Davis (début 2019-03-01) : 4 rencontres de poule sur 3 jours (01, 01, 02, 03/03)
@@ -8,16 +8,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
 
-from mock_source.app import create_app
 from mock_source.chaos import ChaosController
 from mock_source.clock import SimulatedClock
 from mock_source.repository import ReplayRepository
@@ -110,23 +107,24 @@ class MockEnv:
         return self.client
 
 
-@pytest.fixture(scope="session")
-def dataset(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, DatasetCatalog, DataLock]:
-    raw = tmp_path_factory.mktemp("mock") / "raw"
-    catalog, lock = write_dataset(raw)
-    return raw, catalog, lock
+def write_project_config(root: Path, *, replay_start: str = "2019-02-01", state_dir: Path | None = None) -> Path:
+    """Projet de test sur le mini-dataset : années 2019-2020, retries sans attente, état dans `state_dir`."""
+    from tennis_mlops.config import DEFAULT_CONFIG_PATH
 
-
-@pytest.fixture(scope="session")
-def repository(dataset: tuple[Path, DatasetCatalog, DataLock]) -> ReplayRepository:
-    raw, catalog, lock = dataset
-    return ReplayRepository.from_raw(raw, catalog, lock, CONFIG)
-
-
-@pytest.fixture
-def env(repository: ReplayRepository, dataset: tuple[Path, DatasetCatalog, DataLock]) -> Iterator[MockEnv]:
-    raw, catalog, lock = dataset
-    clock = SimulatedClock(start=date(2019, 1, 1), lower=date(2018, 12, 1), upper=date(2020, 12, 31))
-    chaos = ChaosController()
-    with TestClient(create_app(repository, clock, chaos, CONFIG.fixture_horizon_days)) as client:
-        yield MockEnv(repository, clock, chaos, client, raw, catalog, lock)
+    text = DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+    for old, new in [
+        ("first_match_year: 2010", "first_match_year: 2019"),
+        ("last_match_year: 2026", "last_match_year: 2020"),
+        ("bootstrap_start: 2010-01-01", "bootstrap_start: 2019-01-01"),
+        ("replay_start: 2015-01-01", f"replay_start: {replay_start}"),
+        ("replay_end: 2026-05-31", "replay_end: 2020-12-31"),
+        ("retry_delays_s: [1, 2, 4]", "retry_delays_s: [0, 0, 0]"),
+        ("drift_min_history: 20", "drift_min_history: 3"),
+        ("state_dir: state", f"state_dir: {state_dir or root / 'state'}"),
+    ]:
+        assert old in text, old
+        text = text.replace(old, new)
+    (root / "configs").mkdir(parents=True, exist_ok=True)
+    path = root / "configs" / "project.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path

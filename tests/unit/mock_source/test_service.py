@@ -12,8 +12,7 @@ from tennis_mlops.config import DEFAULT_CONFIG_PATH
 from tennis_mlops.data.catalog import DatasetCatalog
 from tennis_mlops.data.errors import DataAccessError
 from tennis_mlops.data.lockfile import DataLock
-
-from .conftest import CONFIG
+from tests.support.mock_world import CONFIG
 
 
 def make_project(tmp_path: Path, dataset: tuple[Path, DatasetCatalog, DataLock]) -> Path:

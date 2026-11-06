@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from .conftest import MockEnv
+from tests.support.mock_world import MockEnv
 
 DATA_ENDPOINTS = ["/results?since=2019-01-01", "/fixtures", "/tournaments", "/rankings"]
 

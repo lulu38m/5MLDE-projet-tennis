@@ -15,8 +15,7 @@ from tennis_mlops.config import DEFAULT_CONFIG_PATH, ProjectConfig
 from tennis_mlops.data.catalog import DatasetCatalog
 from tennis_mlops.data.errors import DataIntegrityError
 from tennis_mlops.data.lockfile import DataLock
-
-from .conftest import MockEnv
+from tests.support.mock_world import MockEnv
 
 
 def assert_no_leak(client: TestClient, now: date) -> None:

@@ -8,8 +8,7 @@ from mock_source.schemas import TournamentStatus
 from tennis_mlops.data.catalog import DatasetCatalog
 from tennis_mlops.data.errors import DataIntegrityError
 from tennis_mlops.data.lockfile import DataLock
-
-from .conftest import CONFIG, write_dataset
+from tests.support.mock_world import CONFIG, write_dataset
 
 
 def dates_by_round(repository: ReplayRepository, tourney_id: str) -> dict[str, set[date]]:

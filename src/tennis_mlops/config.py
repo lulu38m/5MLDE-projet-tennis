@@ -33,12 +33,22 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="TENNIS_", env_file=".env", extra="ignore", frozen=True)
 
-    mlflow_tracking_uri: HttpUrl = HttpUrl("http://localhost:7281")
-    prefect_api_url: HttpUrl = HttpUrl("http://localhost:4200/api")
-    mock_source_url: HttpUrl = HttpUrl("http://localhost:8001")
-    api_url: HttpUrl = HttpUrl("http://localhost:8000")
-    postgres_dsn: SecretStr = SecretStr("postgresql://app_writer:change-me@localhost:5432/app")
+    # Ports d'hôte décalés (5433, 4201) pour coexister avec la stack des TP (5432, 4200) si elle tourne encore.
+    mlflow_tracking_uri: HttpUrl = HttpUrl("http://127.0.0.1:7282")
+    prefect_api_url: HttpUrl = HttpUrl("http://127.0.0.1:4201/api")
+    mock_source_url: HttpUrl = HttpUrl("http://127.0.0.1:8001")
+    api_url: HttpUrl = HttpUrl("http://127.0.0.1:8000")
+    # Identifiants de démonstration d'une base locale liée à 127.0.0.1 ; surchargés par .env.
+    postgres_dsn: SecretStr = SecretStr("postgresql://tennis:tennis-local@127.0.0.1:5433/tennis")
     teams_webhook_url: SecretStr | None = None
+
+    def sqlalchemy_url(self) -> str:
+        """URL SQLAlchemy (pilote psycopg 3) à partir du DSN PostgreSQL ; les autres schémas passent tels quels."""
+        dsn = self.postgres_dsn.get_secret_value()
+        for prefix in ("postgresql://", "postgres://"):
+            if dsn.startswith(prefix):
+                return "postgresql+psycopg://" + dsn.removeprefix(prefix)
+        return dsn
 
 
 class _StrictModel(BaseModel):
@@ -136,6 +146,29 @@ class MockSourceConfig(_StrictModel):
     pauses: tuple[PauseConfig, ...] = ()
 
 
+class IngestionConfig(_StrictModel):
+    """Robustesse des appels à la source et emplacement des traces locales."""
+
+    http_timeout_s: float = Field(default=10.0, gt=0, le=120)
+    retries: int = Field(default=3, ge=0, le=10)
+    retry_delays_s: tuple[float, ...] = Field(default=(1.0, 2.0, 4.0), description="Backoff entre deux essais")
+    state_dir: Path = Path("state")
+    drift_min_history: int = Field(default=20, ge=3, description="Tournois de même niveau requis pour la dérive")
+    drift_quantiles: tuple[float, float] = (0.005, 0.995)
+
+    @model_validator(mode="after")
+    def _check_quantiles(self) -> Self:
+        low, high = self.drift_quantiles
+        if not 0 <= low < high <= 1:
+            msg = "drift_quantiles : attendu 0 <= bas < haut <= 1"
+            raise ValueError(msg)
+        return self
+
+    def resolved_state_dir(self, root: Path = PROJECT_ROOT) -> Path:
+        """Dossier des traces locales (zone brute, quarantaine, rapports Great Expectations)."""
+        return resolve_path(self.state_dir, root)
+
+
 class DemoConfig(_StrictModel):
     """Réglages qui rendent la démo lisible, sans effet sur les résultats."""
 
@@ -148,6 +181,7 @@ class ProjectConfig(_StrictModel):
     data: DataConfig
     simulation: SimulationConfig
     mock_source: MockSourceConfig = MockSourceConfig()
+    ingestion: IngestionConfig = IngestionConfig()
     demo: DemoConfig = DemoConfig()
 
     @model_validator(mode="after")

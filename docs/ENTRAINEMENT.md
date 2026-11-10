@@ -1,8 +1,9 @@
 # Entraînement, suivi MLflow et registre
 
 Le flow Prefect `entrainement-atp` transforme les matchs **validés** (lots passés par Great Expectations) en
-features, entraîne une grille de candidats en parallèle, garde le meilleur sur la validation, le juge sur le test et
-l'enregistre dans le registre MLflow. Tout ce qui permet de comprendre, comparer et réentraîner un modèle est tracé.
+features, entraîne une grille de candidats en parallèle, garde le meilleur sur la validation, le juge sur le test,
+l'enregistre dans le registre MLflow et décide s'il passe en production (règle de mise en service,
+[`TAGGING.md`](TAGGING.md)). Tout ce qui permet de comprendre, comparer et réentraîner un modèle est tracé.
 
 ## Lancer
 
@@ -31,8 +32,10 @@ run MLflow pointe vers le run Prefect (tag `prefect.flow_run_url`).
 | 8 | `Evaluator.segments` × 5N | Métriques du test par surface, niveau, tour, écart de classement, Grand Chelem |
 | 9 | `Evaluator.diagnostics` × N | Latence, taille, importance par permutation, pires prédictions, performance mois par mois, courbe d'apprentissage |
 | 10 | `Reporter.log` × N | Le run enfant complet : métriques, courbes, graphiques, rapport HTML, modèle |
-| 11 | `comparaison avec la production` | Le modèle en service (alias `production`, phase 5) sur le même test |
-| 12 | `Registrar.register` | Nouvelle version du candidat retenu |
+| 11 | `comparaison avec la production` | Le modèle en service (alias `production`) évalué sur le même test |
+| 12 | `ModelRegistry.register` | Nouvelle version du candidat retenu, avec ses tags de provenance et de qualité |
+| 13 | `règle de mise en service` | Verdict règle par règle (`configs/promotion.yaml`) |
+| 14 | `Promoter.apply` | Alias `production` déplacé, ou version refusée (`staging`) ; décision inscrite au journal |
 
 Chaque campagne repart de la base (pas de cache entre campagnes). `demo.sleep_s` (`configs/project.yaml`) ralentit
 chaque étape pour la rendre lisible dans l'UI Prefect.
@@ -80,9 +83,9 @@ pipeline : MLflow le sauvegarde avec le modèle.
 | Onglet MLflow | Ce qu'on y voit |
 |---|---|
 | **Artifacts → `rapport.html`** (candidat) | Le candidat sur une page : chiffres clés contre l'Elo pur, scores par partition et baselines, log loss mois par mois, graphiques, segments, plus grosses surprises, coûts, fiche modèle |
-| **Artifacts → `rapport_campagne.html`** (campagne) | La campagne sur une page : candidats classés (le retenu surligné), baselines, le retenu dans le temps, comparaison à la production, données, dérive, durées, reproductibilité |
+| **Artifacts → `rapport_campagne.html`** (campagne) | La campagne sur une page : candidats classés (le retenu surligné), baselines, le retenu dans le temps, décision de mise en service règle par règle, données, dérive, durées, reproductibilité |
 | **Model metrics** | Graphiques regroupés par section (voir ci-dessous) ; les séries `monthly/*` et `learning/*` s'affichent en courbes |
-| **Overview** | Paramètres, tags (`best.*`, `registry.*`, `production.comparison`), jeux associés |
+| **Overview** | Paramètres (dont `promotion.*`), tags (`best.*`, `registry.*`, `gate.*`, `production.comparison`), jeux associés |
 | Liste des runs, vue **Chart** | Comparer les candidats d'une campagne sur une métrique (`validation/log_loss`, `cost/fit_s`…) |
 
 Les rapports HTML n'ont ni JavaScript ni ressource externe (graphiques intégrés en base64) : ils s'ouvrent aussi
@@ -103,7 +106,8 @@ MLflow range les graphiques de l'onglet « Model metrics » par préfixe (`secti
 | `baseline_elo/`, `baseline_rang/` | campagne | Métriques des baselines sur validation et test |
 | `best/` | campagne | Métriques du candidat retenu |
 | `monthly_best/` | campagne | Les courbes mensuelles du retenu |
-| `production/` | campagne | Le modèle en service sur le même test, et l'écart avec le retenu (à partir de la phase 5) |
+| `production/` | campagne | Le modèle en service sur le même test, et l'écart avec le retenu |
+| `gate/` | campagne | `passed` (1/0), `rules_failed`, `delta_log_loss` (retenu − production) |
 | `parallel/` | campagne | `workers`, `training_wall_s`, `fit_sum_s`, `fit_sum_over_wall` |
 | `duration/` | campagne | Durée de chaque étape (`dataset_s`, `training_wall_s`, `evaluation_and_logging_s`…) |
 | `drift/` | campagne | `max_psi`, `features_over_alert` par rapport à la campagne précédente |
@@ -119,6 +123,7 @@ mois du calendrier au lieu des numéros d'étape.
 | Données | 3 jeux associés (`atp-train`, `atp-validation`, `atp-test`, avec digest), `data/features.parquet` + SHA-256, `data/profile_train.json`, `data/provenance.json` (lots valides / en quarantaine, dernier lot, watermark), `data/drift_vs_previous.json` |
 | Reproductibilité | sha Git (et état modifié), `uv.lock` + `pyproject.toml`, empreinte de `uv.lock`, version de Python, `dataset_version`, lien du run Prefect |
 | Résultats | `rapport_campagne.html`, `candidates.csv`, `plots/candidates_validation.png`, `plots/monthly_best.png`, `evaluation/monthly_best.csv`, métriques des baselines et du retenu, comparaison à la production |
+| Décision | `decision/gate.json`, `decision/rules.csv`, `config/promotion_resolved.yaml`, tags `gate.status`, `gate.reason`, `registry.production_version` |
 | Coûts | durée de chaque étape, durée réelle de l'entraînement vs somme des durées, mémoire maximale du processus |
 
 **Run enfant par candidat** (`tags.kind = candidate`)
@@ -135,9 +140,9 @@ mois du calendrier au lieu des numéros d'étape.
 | Fiche | `model_card.md` : usage prévu, données, métriques comparées aux baselines, limites |
 | Modèle | pipeline complet, format **skops** (types scikit-learn déclarés de confiance, tout autre type refusé), signature, exemple d'entrée, dépendances exportées de `uv.lock` ; `predict` du modèle pyfunc renvoie les probabilités |
 
-**Registre** : modèle `atp-winner`, une version par campagne, reliée à son run, avec les tags `campaign_run_id`,
-`dataset_version`, `features_version`, métriques de validation et de test, `lifecycle=candidate`,
-`qualification=pending`. La règle de mise en service, les alias et le rollback sont la phase 5.
+**Registre** : modèle `atp-winner`, une version par campagne, reliée à son run, avec ses tags de provenance, de
+qualité, de décision et de cycle de vie. La règle de mise en service, les alias (`production`, `previous`,
+`staging`), le rollback et le journal des décisions sont décrits dans [`TAGGING.md`](TAGGING.md).
 
 Recharger une version dans un autre processus :
 

@@ -27,6 +27,7 @@ htmlcov/
 # Traces locales des outils MLOps
 mlruns/
 mlartifacts/
+mlflow.db
 state/
 loadtest/results/*.csv
 

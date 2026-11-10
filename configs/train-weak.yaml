@@ -1,0 +1,23 @@
+# Campagne volontairement MAUVAISE (`make train-weak`) : montre un rejet par la règle de mise en service (S6).
+# Régularisation extrême (C = 0,00001) : les coefficients restent minuscules, les probabilités sont écrasées vers
+# 50 %. Le classement des favoris reste correct (l'accuracy passe), mais la log loss est mauvaise : c'est elle que la
+# règle juge. La version est enregistrée comme les autres, puis refusée : `production` ne bouge pas, la version porte
+# `lifecycle=rejected`, `gate_status=failed` et la raison, et l'alias `staging` la garde en observation.
+
+experiment: atp-winner
+registered_model: atp-winner
+seed: 42
+
+split:
+  train_start: 2011-01-01
+  validation_months: 6
+  test_months: 6
+  min_rows: 300
+
+selection_metric: log_loss
+workers: 1
+
+candidates:
+  - model: logistic_regression
+    grid:
+      C: [0.00001]

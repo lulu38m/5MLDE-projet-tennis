@@ -35,6 +35,8 @@ def test_tables_format_numbers_missing_values_and_highlight() -> None:
     assert "&lt;b&gt;x&lt;/b&gt;" in rendered
     assert rendered.count('class="selected"') == 1
     assert "retenu" not in rendered
+    toned = h.table(pd.DataFrame({"règle": ["a", "b"], "résultat": ["OK", "ÉCHEC"]}), tones={"ÉCHEC": "bad"})
+    assert '<td class="bad">ÉCHEC</td>' in toned and '<td class="">OK</td>' in toned
 
 
 def test_cards_images_and_page() -> None:

@@ -1,0 +1,12 @@
+# Règle de mise en service : l'alias `production` n'est déplacé que si TOUTES les règles passent.
+# Tout est mesuré sur le même jeu de test (les mois les plus récents de la campagne), jamais vu à l'entraînement.
+# Toujours vérifiées : données validées par Great Expectations, Elo pur battu (log loss), accuracy au moins égale à
+# « le mieux classé gagne ». Détail et justification : docs/TAGGING.md.
+
+min_improvement: 0.0            # log loss candidat ≤ production − ε ; ε = 0 : à égalité, on prend le plus récent
+                                # (entraîné sur des données plus fraîches)
+min_test_rows: 500              # en dessous, l'écart entre deux modèles n'est pas mesurable de façon fiable
+segment_dimension: surface      # aucune surface ne doit se dégrader nettement, même si la moyenne s'améliore
+min_segment_rows: 100           # une surface avec moins de matchs de test n'est pas jugée (trop de bruit)
+max_segment_regression: 0.03    # log loss par surface : au plus +0,03 par rapport à la production
+max_psi: 0.25                   # dérive des features vs la campagne précédente : au-delà, décision humaine

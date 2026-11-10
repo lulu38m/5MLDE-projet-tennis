@@ -6,7 +6,9 @@ DatasetBuilder.build ─► TemporalSplitter.split ─► profil / dérive ─�
          PipelineFactory.create ─► Trainer.fit ─► Evaluator.evaluate ─┬─► segments (5, en parallèle)
                                                                        └─► diagnostics (coûts, importance, erreurs)
                                                                               └─► Reporter.log_candidate (run enfant)
-   └─► sélection sur la validation ─► comparaison à la production ─► Registrar.register ─► bilan (run parent)
+   └─► sélection sur la validation ─► comparaison à la production ─► ModelRegistry.register
+         └─► règle de mise en service (configs/promotion.yaml) ─► Promoter.apply : alias `production` déplacé ou
+             version refusée (`staging`) ─► journal des décisions ─► bilan (run parent)
 ```
 
 - **MLflow** : un run parent « campagne » (données, config, baselines, comparaison des candidats) et un run enfant
@@ -15,6 +17,8 @@ DatasetBuilder.build ─► TemporalSplitter.split ─► profil / dérive ─�
 - **Parallélisme** : `ThreadPoolTaskRunner(workers)`. Le bilan trace la durée réelle de l'entraînement et la somme
   des durées individuelles ; `make train WORKERS=1` donne la référence séquentielle.
 - **Sélection** sur la validation, **bilan** sur le test : le test ne sert jamais à choisir.
+- **Mise en service** : le retenu et la production sont jugés sur le même test ; l'alias `production` n'est déplacé
+  que si toutes les règles passent (docs/TAGGING.md). Un rejet n'est pas un échec du flow : c'est une décision.
 
 Lancement : `make train` (ou `python -m tennis_mlops.flows.train`).
 """
@@ -44,16 +48,30 @@ from tennis_mlops.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, ProjectConfig
 from tennis_mlops.features import FEATURES_VERSION
 from tennis_mlops.ingestion.store import IngestionStore
 from tennis_mlops.log import quiet_training_noise
+from tennis_mlops.registry.events import RegistryEvent
+from tennis_mlops.registry.gate import (
+    DEFAULT_PROMOTION_CONFIG_PATH,
+    DataEvidence,
+    Gate,
+    GateDecision,
+    GateInputs,
+    ModelScores,
+    PromotionPolicy,
+)
+from tennis_mlops.registry.journal import DecisionJournal
+from tennis_mlops.registry.model_registry import ModelRegistry, RegisteredVersion
+from tennis_mlops.registry.promotion import Promoter
+from tennis_mlops.registry.tagging import version_tags
 from tennis_mlops.training import drift as data_drift
 from tennis_mlops.training.config import DEFAULT_TRAIN_CONFIG_PATH, TrainConfig
 from tennis_mlops.training.dataset import Dataset, DatasetBuilder, MatchSource
 from tennis_mlops.training.evaluate import SEGMENT_DIMENSIONS, Evaluation, Evaluator, elo_baseline, rank_baseline
 from tennis_mlops.training.pipeline import CandidateSpec, PipelineFactory, expand_grid
-from tennis_mlops.training.registry import RegisteredVersion, Registrar
 from tennis_mlops.training.report import CampaignSummary, CandidateResult, Reporter
 from tennis_mlops.training.split import Split, TemporalSplitter
 from tennis_mlops.training.tracking import MlflowTracker, code_info
 from tennis_mlops.training.trainer import FittedCandidate, Trainer
+from tennis_mlops.validation.suites import SUITES_VERSION
 
 FLOW_NAME = "entrainement-atp"
 
@@ -74,6 +92,10 @@ class CampaignReport(BaseModel):
     baselines_validation: dict[str, float]
     registered_version: str | None = None
     production_comparison: str
+    gate_status: str = ""
+    gate_reason: str = ""
+    production_version: str | None = None
+    decision: str = ""
     training_wall_seconds: float
     fit_sum_seconds: float
     data_end: str
@@ -82,11 +104,13 @@ class CampaignReport(BaseModel):
         """Quelques lignes pour le terminal."""
         baselines = ", ".join(f"{k} {v:.4f}" for k, v in self.baselines_validation.items())
         return (
-            f"campagne terminée : {self.candidates} candidats ({self.workers} en parallèle), données jusqu'au "
+            f"campagne terminée : {self.candidates} candidat{'s' if self.candidates > 1 else ''} "
+            f"({self.workers} en parallèle), données jusqu'au "
             f"{self.data_end}\n"
             f"  retenu   : {self.best_candidate} — {self.selection_metric} validation {self.best_validation:.4f}, "
             f"test {self.best_test:.4f} (baselines validation : {baselines})\n"
-            f"  registre : version {self.registered_version} ; production : {self.production_comparison}\n"
+            f"  registre : version {self.registered_version} ; comparée à : {self.production_comparison}\n"
+            f"  décision : {self.decision}\n"
             f"  entraînement : {self.training_wall_seconds:.1f} s réels pour {self.fit_sum_seconds:.1f} s cumulés\n"
             f"  MLflow   : {self.campaign_url}"
         )
@@ -242,37 +266,72 @@ def report_candidate(
         test=evaluation.metrics["test"],
         fit_seconds=fitted.fit_seconds,
         monthly=logged.monthly,
+        segments=pd.concat(segments, ignore_index=True),
     )
 
 
 # --------------------------------------------------------------------------- tasks : décision
 
 
+@dataclass(frozen=True)
+class ProductionComparison:
+    """Le modèle en service, jugé sur le même test que le candidat (s'il existe et parle les mêmes features)."""
+
+    note: str
+    version: str | None = None
+    evaluation: Evaluation | None = None
+    segments: pd.DataFrame | None = None
+
+
 @task(name="comparaison avec la production", cache_policy=NO_CACHE)
 def compare_with_production(
-    registrar: Registrar, config: TrainConfig, evaluator: Evaluator, split: Split
-) -> tuple[str, Evaluation | None]:
+    registry: ModelRegistry, evaluator: Evaluator, split: Split, dimension: str
+) -> ProductionComparison:
     """Évalue le modèle en service sur le même test, s'il existe et parle les mêmes features."""
-    production = registrar.production(config.registered_model)
+    production = registry.production()
     if production is None:
-        return "aucune version en production (alias posé en phase 5)", None
+        return ProductionComparison("aucune version en production")
+    version = str(production.version.version)
     version_features = production.version.tags.get("features_version")
     if version_features != FEATURES_VERSION:
-        return f"version {production.version.version} incomparable (features v{version_features})", None
-    evaluation = evaluator.evaluate(f"production v{production.version.version}", production.model, split)
-    return f"version {production.version.version}", evaluation
+        return ProductionComparison(f"v{version} incomparable (features v{version_features})", version)
+    evaluation = evaluator.evaluate(f"production v{version}", production.model, split)
+    return ProductionComparison(f"v{version}", version, evaluation, evaluator.segments(evaluation, split, dimension))
 
 
-@task(name="Registrar.register", cache_policy=NO_CACHE)
+@task(name="ModelRegistry.register", cache_policy=NO_CACHE)
 def register_best(
-    registrar: Registrar, config: TrainConfig, best: CandidateResult, tags: Mapping[str, str]
+    registry: ModelRegistry, config: TrainConfig, best: CandidateResult, tags: Mapping[str, str]
 ) -> RegisteredVersion:
-    """Nouvelle version `candidate` du modèle retenu (la mise en service est la phase 5)."""
+    """Nouvelle version du modèle retenu, `lifecycle=candidate` jusqu'à la décision."""
     description = (
         f"{best.name} — {config.selection_metric} validation {best.validation[config.selection_metric]:.4f}, "
         f"test {best.test[config.selection_metric]:.4f}. Campagne {tags['campaign_run_id']}."
     )
-    return registrar.register(config.registered_model, best.model_uri, best.run_id, tags, description)
+    return registry.register(best.model_uri, best.run_id, tags, description)
+
+
+@task(name="règle de mise en service", cache_policy=NO_CACHE)
+def decide_promotion(gate: Gate, inputs: GateInputs) -> GateDecision:
+    """Verdict règle par règle (configs/promotion.yaml), sur le même test pour le candidat et la production."""
+    decision = gate.decide(inputs)
+    logger = get_run_logger()
+    for rule in decision.rules:
+        logger.info("  %-50s %-10s %s", rule.label, "OK" if rule.passed else "ÉCHEC", rule.observed)
+    return decision
+
+
+@task(name="Promoter.apply", cache_policy=NO_CACHE)
+def apply_decision(
+    promoter: Promoter, journal: DecisionJournal, version: str, decision: GateDecision, campaign_id: str
+) -> RegistryEvent:
+    """Déplace les alias (ou refuse la version), puis inscrit la décision dans le journal MLflow."""
+    event = promoter.apply(version, decision, campaign_id)
+    logger = get_run_logger()
+    logger.info(event.summary())
+    if problem := journal.try_record(event):
+        logger.warning(problem)
+    return event
 
 
 # --------------------------------------------------------------------------- flow
@@ -280,12 +339,18 @@ def register_best(
 
 @flow(name=FLOW_NAME)
 def training_flow(
-    train_config_path: str | None = None, project_config_path: str | None = None, workers: int | None = None
+    train_config_path: str | None = None,
+    project_config_path: str | None = None,
+    workers: int | None = None,
+    promotion_config_path: str | None = None,
 ) -> CampaignReport:
-    """Entraîne la grille de candidats sur les matchs validés, choisit, compare, enregistre."""
+    """Entraîne la grille de candidats sur les matchs validés, choisit, compare, enregistre, décide."""
     quiet_training_noise()
     config = TrainConfig.from_yaml(Path(train_config_path) if train_config_path else DEFAULT_TRAIN_CONFIG_PATH)
     project = ProjectConfig.from_yaml(Path(project_config_path) if project_config_path else DEFAULT_CONFIG_PATH)
+    policy = PromotionPolicy.from_yaml(
+        Path(promotion_config_path) if promotion_config_path else DEFAULT_PROMOTION_CONFIG_PATH
+    )
     settings = Settings()
     workers = workers or config.workers
     deps = dependency_factory(config, settings)
@@ -296,7 +361,9 @@ def training_flow(
     progress = Progress()
     try:
         _log_configuration(tracker, campaign_id, config, project, workers)
-        report = _campaign(deps, config, project.demo.sleep_s, workers, Campaign(campaign_id, context), progress)
+        _log_policy(tracker, campaign_id, policy)
+        campaign = Campaign(campaign_id, context, policy)
+        report = _campaign(deps, config, project.demo.sleep_s, workers, campaign, progress)
         progress.step = "bilan"
         tracker.finish(campaign_id)
     except BaseException as exc:
@@ -320,6 +387,7 @@ class Campaign:
 
     run_id: str
     context: Mapping[str, str]
+    policy: PromotionPolicy
 
 
 def _campaign(
@@ -327,7 +395,8 @@ def _campaign(
 ) -> CampaignReport:
     tracker, logger = deps.tracker, get_run_logger()
     campaign_id = campaign.run_id
-    evaluator, reporter, registrar = Evaluator(config.evaluation), Reporter(tracker, config), Registrar(tracker)
+    evaluator, reporter = Evaluator(config.evaluation), Reporter(tracker, config)
+    registry = ModelRegistry(tracker.client, config.registered_model)
     durations: dict[str, float] = {}
 
     def timed(name: str, started: float) -> None:
@@ -398,27 +467,27 @@ def _campaign(
     best = min(results, key=lambda r: r.validation[metric])
     progress.step = "sélection, comparaison et registre"
     started = time.perf_counter()
-    comparison, production = compare_with_production(registrar, config, evaluator, split)
-    tags = {
-        "campaign_run_id": campaign_id,
-        "dataset_version": ",".join(dataset.dataset_versions),
-        "features_version": FEATURES_VERSION,
-        "selection_metric": metric,
-        f"validation.{metric}": f"{best.validation[metric]:.5f}",
-        f"test.{metric}": f"{best.test[metric]:.5f}",
-        "lifecycle": "candidate",
-        "qualification": "pending",
-        "data_end": split.end.isoformat(),
-        "prefect_flow_run_id": str(flow_run.get_id() or ""),
-    }
-    registered = register_best(registrar, config, best, tags)
+    dimension = campaign.policy.segment_dimension
+    production = compare_with_production(registry, evaluator, split, dimension)
+    tags = version_tags(config=config, dataset=dataset, split=split, context=campaign.context,
+                        campaign_run_id=campaign_id, candidate=best.name, validation_score=best.validation[metric],
+                        test_score=best.test[metric])  # fmt: skip
+    registered = register_best(registry, config, best, tags)
     timed("selection_and_registry", started)
+
+    progress.step = "règle de mise en service"
+    started = time.perf_counter()
+    inputs = _gate_inputs(best, baselines, production, dataset, split, drift, dimension)
+    decision = decide_promotion(Gate(campaign.policy), inputs)
+    journal = DecisionJournal.for_model(tracker.tracking_uri, config.registered_model)
+    event = apply_decision(Promoter(registry), journal, registered.version, decision, campaign_id)
+    timed("decision", started)
 
     progress.step = "bilan"
     summary = CampaignSummary(
-        results=results, best=best, baselines=baselines, production=production, comparison=comparison,
+        results=results, best=best, baselines=baselines, production=production.evaluation, comparison=production.note,
         registered=registered, durations=durations, workers=workers, peak_rss_mb=peak_rss_mb(), dataset=dataset,
-        split=split, drift=drift, context=campaign.context, failed=failed,
+        split=split, drift=drift, context=campaign.context, failed=failed, decision=decision, event=event,
     )  # fmt: skip
     reporter.log_campaign(campaign_id, summary)
     return CampaignReport(
@@ -434,11 +503,53 @@ def _campaign(
         best_test=best.test[metric],
         baselines_validation={k: v.metrics["validation"][metric] for k, v in baselines.items()},
         registered_version=registered.version,
-        production_comparison=comparison,
+        production_comparison=production.note,
+        gate_status=decision.status.value,
+        gate_reason=decision.reason,
+        production_version=event.production_after,
+        decision=event.summary(),
         training_wall_seconds=durations["duration/training_wall_s"],
         fit_sum_seconds=summary.fit_sum,
         data_end=split.end.isoformat(),
     )
+
+
+def _gate_inputs(
+    best: CandidateResult,
+    baselines: Mapping[str, Evaluation],
+    production: ProductionComparison,
+    dataset: Dataset,
+    split: Split,
+    drift: Mapping[str, Any],
+    dimension: str,
+) -> GateInputs:
+    """Scores du retenu, des baselines et de la production sur le test commun, et état des données."""
+    rows = len(split.test)
+    lots = dataset.lots
+    production_scores = (
+        ModelScores.from_metrics(production.evaluation.metrics["test"], rows, production.segments, dimension)
+        if production.evaluation is not None
+        else None
+    )
+    return GateInputs(
+        candidate=ModelScores.from_metrics(best.test, rows, best.segments, dimension),
+        baselines={name: ModelScores.from_metrics(ev.metrics["test"], rows) for name, ev in baselines.items()},
+        data=DataEvidence(
+            lots_valid=int(lots.get("lots_valid") or 0),
+            lots_quarantined=int(lots.get("lots_quarantined") or 0),
+            suite_version=SUITES_VERSION,
+            max_psi=float(drift["max_psi"]) if "max_psi" in drift else None,
+        ),
+        production=production_scores,
+        production_version=production.version if production_scores is not None else None,
+        production_note=production.note,
+    )
+
+
+def _log_policy(tracker: MlflowTracker, run_id: str, policy: PromotionPolicy) -> None:
+    tracker.log_params(run_id, {f"promotion.{k}": v for k, v in policy.model_dump().items()})
+    tracker.log_text(run_id, yaml.safe_dump(policy.model_dump(), allow_unicode=True, sort_keys=False),
+                     "config/promotion_resolved.yaml")  # fmt: skip
 
 
 def _first_error(states: Sequence[State[Any]]) -> BaseException:
@@ -503,6 +614,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tennis_mlops.flows.train", description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_TRAIN_CONFIG_PATH)
     parser.add_argument("--project-config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--promotion-config", type=Path, default=DEFAULT_PROMOTION_CONFIG_PATH)
     parser.add_argument(
         "--workers", type=int, default=None, help="candidats en parallèle (défaut : configs/train.yaml)"
     )
@@ -511,7 +623,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Les futures du pool de threads sont des PrefectFuture : cast pour l'invariance des génériques de Prefect.
     runner = cast("TaskRunner[PrefectFuture[Any]]", ThreadPoolTaskRunner(max_workers=workers))
     state = training_flow.with_options(task_runner=runner)(
-        str(args.config), str(args.project_config), workers, return_state=True
+        str(args.config), str(args.project_config), workers, str(args.promotion_config), return_state=True
     )
     if state.is_failed():
         return EXIT_FAILED

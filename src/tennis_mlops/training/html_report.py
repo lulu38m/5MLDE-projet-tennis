@@ -103,15 +103,30 @@ def images(figures: Mapping[str, Figure]) -> str:
     return f'<div class="grid">{"".join(blocks)}</div>'
 
 
-def table(frame: pd.DataFrame, digits: int = 4, highlight: str | None = None, scroll: bool = False) -> str:
-    """Tableau HTML : nombres alignés à droite et arrondis ; `highlight` = colonne booléenne à mettre en avant."""
+def table(
+    frame: pd.DataFrame,
+    digits: int = 4,
+    highlight: str | None = None,
+    scroll: bool = False,
+    tones: Mapping[str, str] | None = None,
+) -> str:
+    """Tableau HTML : nombres alignés à droite et arrondis.
+
+    `highlight` = colonne booléenne à mettre en avant ; `tones` = classe CSS d'une cellule selon son texte
+    (`{"OK": "good", "ÉCHEC": "bad"}`).
+    """
     columns = [c for c in frame.columns if c != highlight]
     places = {c: 0 if _integral(frame[c]) else digits for c in columns}
     head = "".join(f'<th class="{_kind(frame[c])}">{esc(c)}</th>' for c in columns)
+    tones = tones or {}
     rows = []
     for record in frame.to_dict("records"):
         selected = ' class="selected"' if highlight and record.get(highlight) else ""
-        cells = "".join(f'<td class="{_kind(frame[c])}">{_format(record[c], places[c])}</td>' for c in columns)
+        cells = "".join(
+            f'<td class="{_classes(_kind(frame[c]), tones.get(str(record[c]), ""))}">'
+            f"{_format(record[c], places[c])}</td>"
+            for c in columns
+        )
         rows.append(f"<tr{selected}>{cells}</tr>")
     body = f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
     return f'<div class="scroll">{body}</div>' if scroll else body
@@ -160,6 +175,10 @@ def _inline(text: str) -> str:
 
 def _kind(series: pd.Series[Any]) -> str:
     return "num" if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series) else ""
+
+
+def _classes(*names: str) -> str:
+    return " ".join(n for n in names if n)
 
 
 def _integral(series: pd.Series[Any]) -> bool:

@@ -3,7 +3,8 @@
 .PHONY: help setup lint format typecheck test check clean \
         data data-lock data-verify data-profile \
         up down logs ps urls mock clock advance chaos \
-        ingest lots gx-docs db train train-seq mlflow
+        ingest lots gx-docs db train train-seq train-weak mlflow \
+        registry promote rollback trace
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -13,6 +14,8 @@ FAILURES ?=
 DELAY ?=
 DATE ?=
 WORKERS ?=
+VERSION ?=
+REASON ?=
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
@@ -121,8 +124,26 @@ train: ## Campagne d'entraînement en parallèle (configs/train.yaml), suivie da
 train-seq: ## Même campagne, un candidat à la fois : la référence pour mesurer le gain du parallélisme
 	$(UV) python -m tennis_mlops.flows.train --workers 1
 
+train-weak: ## Campagne volontairement mauvaise (configs/train-weak.yaml) : enregistrée puis refusée par la règle
+	$(UV) python -m tennis_mlops.flows.train --config configs/train-weak.yaml
+
 mlflow: ## Ouvre l'interface MLflow
 	$(UV) python -m webbrowser -t "http://127.0.0.1:7282"
+
+# --------------------------------------------------------------------------- registre (ne dépend que de MLflow)
+
+registry: ## État du registre : versions, alias production / previous / staging, décisions
+	$(UV) python -m tennis_mlops.registry status
+
+promote: ## Mise en production manuelle : `make promote VERSION=3 REASON="meilleur en shadow"`
+	@test -n "$(VERSION)" -a -n "$(REASON)" || { echo 'usage : make promote VERSION=3 REASON="…"'; exit 2; }
+	$(UV) python -m tennis_mlops.registry promote --version "$(VERSION)" --reason "$(REASON)"
+
+rollback: ## Revient à la version `previous` : `make rollback REASON="probabilités aberrantes"`
+	$(UV) python -m tennis_mlops.registry rollback --reason "$(or $(REASON),rollback manuel (make rollback))"
+
+trace: ## Chaîne de traçabilité d'une version (défaut : production) : `make trace VERSION=3`
+	$(UV) python -m tennis_mlops.registry trace $(if $(VERSION),--version $(VERSION))
 
 comma := ,
 

@@ -2,6 +2,8 @@
 
 Chaque joueur a un niveau caché ; le vainqueur est tiré selon l'écart de niveau. Le classement publié suit ce
 niveau avec du bruit : un modèle doit donc faire mieux que le hasard, sans que rien ne soit écrit d'avance.
+Avec `surface_effect > 0`, chaque joueur a en plus un niveau propre à chaque surface (des spécialistes) : un modèle
+qui pondère l'Elo de surface peut alors battre la baseline Elo pur, comme sur les vraies données.
 """
 
 from __future__ import annotations
@@ -17,11 +19,17 @@ LEVELS = ("A", "M", "G")
 
 
 def synthetic_matches(
-    start: date = date(2010, 1, 4), weeks: int = 160, matches_per_week: int = 40, players: int = 80, seed: int = 7
+    start: date = date(2010, 1, 4),
+    weeks: int = 160,
+    matches_per_week: int = 40,
+    players: int = 80,
+    seed: int = 7,
+    surface_effect: float = 0.0,
 ) -> pd.DataFrame:
     """Un tournoi par semaine (`matches_per_week` matchs répartis sur 4 jours), dataset_version `synthetique`."""
     rng = np.random.default_rng(seed)
     skill = rng.normal(0, 1, players)
+    specialty = np.random.default_rng(seed + 1).normal(0, surface_effect, (players, len(SURFACES)))
     rank_order = np.argsort(-(skill + rng.normal(0, 0.3, players)))
     ranks = np.empty(players, dtype=int)
     ranks[rank_order] = np.arange(1, players + 1)
@@ -32,7 +40,8 @@ def synthetic_matches(
         surface, level = SURFACES[week % 3], LEVELS[week % 3]
         for num in range(1, matches_per_week + 1):
             a, b = rng.choice(players, size=2, replace=False)
-            p_a = 1 / (1 + np.exp(-(skill[a] - skill[b]) * 1.5))
+            s = week % 3
+            p_a = 1 / (1 + np.exp(-(skill[a] + specialty[a, s] - skill[b] - specialty[b, s]) * 1.5))
             winner, loser = (a, b) if rng.random() < p_a else (b, a)
             status = "walkover" if num == matches_per_week and week % 10 == 0 else "completed"
             rows.append({

@@ -11,6 +11,8 @@ from prefect import State
 
 from tennis_mlops.flows import train
 from tennis_mlops.flows.train import CampaignReport, TrainingDependencies
+from tennis_mlops.registry.gate import PromotionPolicy
+from tennis_mlops.registry.model_registry import ModelRegistry
 from tennis_mlops.training.config import CandidateGrid, ModelKind, SplitConfig, TrainConfig
 from tennis_mlops.training.tracking import MlflowTracker
 from tests.support.mlflow_local import sqlite_uri, working_directory
@@ -31,6 +33,23 @@ class TrainWorld:
         path.write_text(yaml.safe_dump(small_config(**overrides).model_dump(mode="json")), encoding="utf-8")
         return str(path)
 
+    def promotion(self, **overrides: object) -> str:
+        """Règle de mise en service adaptée aux petites données synthétiques."""
+        policy = PromotionPolicy.model_validate({"min_test_rows": 50, "min_segment_rows": 30, **overrides})
+        path = self.folder / f"promotion-{len(list(self.folder.glob('promotion-*.yaml')))}.yaml"
+        path.write_text(yaml.safe_dump(policy.model_dump()), encoding="utf-8")
+        return str(path)
+
+    @property
+    def registry(self) -> ModelRegistry:
+        return ModelRegistry(self.tracker.client, "atp-tests")
+
+    def decisions(self) -> list[dict[str, str]]:
+        experiment = self.tracker.client.get_experiment_by_name("atp-tests-decisions")
+        assert experiment is not None
+        runs = self.tracker.client.search_runs([experiment.experiment_id], order_by=["attributes.start_time ASC"])
+        return [dict(r.data.tags) for r in runs]
+
     def runs(self, kind: str) -> list[Any]:
         return list(self.tracker.client.search_runs([self.tracker.experiment_id], f"tags.kind = '{kind}'",
                                                     order_by=["attributes.start_time ASC"]))  # fmt: skip
@@ -40,13 +59,16 @@ class TrainWorld:
 def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TrainWorld]:
     with working_directory(tmp_path):
         tracker = MlflowTracker(sqlite_uri(tmp_path), "tests", pip_requirements=["scikit-learn==1.6.1"])
-        source = FrameSource(synthetic_matches())
+        source = FrameSource(synthetic_matches(surface_effect=1.0))  # des spécialistes : l'Elo pur est battable
         monkeypatch.setattr(train, "dependency_factory", lambda *_: TrainingDependencies(source, tracker))
         yield TrainWorld(tmp_path, tracker, source)
 
 
-def campaign(world: TrainWorld, **overrides: object) -> tuple[State[Any], CampaignReport | None]:
-    state = train.training_flow(world.config(**overrides), None, 2, return_state=True)
+def campaign(
+    world: TrainWorld, promotion: dict[str, object] | None = None, **overrides: object
+) -> tuple[State[Any], CampaignReport | None]:
+    state = train.training_flow(world.config(**overrides), None, 2, world.promotion(**(promotion or {})),
+                                return_state=True)  # fmt: skip
     result = state.result(raise_on_failure=False)
     return state, result if isinstance(result, CampaignReport) else None
 
@@ -57,7 +79,9 @@ def test_campaign_trains_compares_and_registers(world: TrainWorld) -> None:
     assert (report.candidates, report.workers, report.failed_candidates) == (3, 2, [])
     assert report.best_validation <= min(report.baselines_validation.values()) + 0.05
     assert report.registered_version == "1"
-    assert report.production_comparison.startswith("aucune version")
+    assert report.production_comparison == "aucune version en production"
+    assert (report.gate_status, report.production_version) == ("passed", "1")
+    assert "première mise en service" in report.gate_reason and "en production" in report.decision
 
     (parent,) = world.runs("campaign")
     children = world.runs("candidate")
@@ -65,7 +89,10 @@ def test_campaign_trains_compares_and_registers(world: TrainWorld) -> None:
     assert len(children) == 3 and all(c.info.status == "FINISHED" for c in children)
     assert all(c.data.tags["mlflow.parentRunId"] == parent.info.run_id for c in children)
     assert {"parallel/training_wall_s", "baseline_elo/validation_log_loss", "best/test_roc_auc",
-            "cost/peak_rss_mb", "duration/training_wall_s"} <= set(parent.data.metrics)  # fmt: skip
+            "cost/peak_rss_mb", "duration/training_wall_s", "duration/decision_s", "gate/passed"} <= set(
+        parent.data.metrics)  # fmt: skip
+    assert (parent.data.tags["gate.status"], parent.data.tags["registry.production_version"]) == ("passed", "1")
+    assert parent.data.params["promotion.min_test_rows"] == "50"
     assert parent.data.params["split.train_rows"] == str(report_rows(parent))
     artifacts = {a.path for a in world.tracker.client.list_artifacts(parent.info.run_id, "data")}
     assert {"data/features.parquet", "data/profile_train.json", "data/provenance.json"} <= artifacts
@@ -75,6 +102,11 @@ def test_campaign_trains_compares_and_registers(world: TrainWorld) -> None:
     )
     client = world.tracker.client
     assert {"rapport_campagne.html", "candidates.csv"} <= {a.path for a in client.list_artifacts(parent.info.run_id)}
+    assert {"decision/gate.json", "decision/rules.csv"} <= {
+        a.path for a in client.list_artifacts(parent.info.run_id, "decision")
+    }
+    campaign_html = client.download_artifacts(parent.info.run_id, "rapport_campagne.html", str(world.folder))
+    assert "Décision de mise en service" in Path(campaign_html).read_text(encoding="utf-8")
     assert "rapport.html" in {a.path for a in client.list_artifacts(best.info.run_id)}
     assert len(client.get_metric_history(best.info.run_id, "monthly/log_loss")) > 6
     assert len(client.get_metric_history(parent.info.run_id, "monthly_best/log_loss")) > 6
@@ -83,8 +115,16 @@ def test_campaign_trains_compares_and_registers(world: TrainWorld) -> None:
     html_path = client.download_artifacts(best.info.run_id, "rapport.html", str(world.folder))
     assert "Dans le temps" in Path(html_path).read_text(encoding="utf-8")
     version = world.tracker.client.get_model_version("atp-tests", "1")
-    assert (version.run_id, version.tags["lifecycle"], version.tags["qualification"]) == (
-        report.best_run_id, "candidate", "pending",
+    tags = version.tags
+    assert (version.run_id, tags["lifecycle"], tags["gate_status"], tags["decided_by"]) == (
+        report.best_run_id, "production", "passed", "pipeline",
+    )  # fmt: skip
+    assert tags["campaign_run_id"] == parent.info.run_id and tags["data_validation"] == "passed"
+    assert int(tags["n_test"]) > 0 and len(tags["config_hash"]) == 16 and tags["candidate"] == report.best_candidate
+    assert world.registry.aliases() == {"production": "1"}
+    (decision,) = world.decisions()
+    assert (decision["event"], decision["version"], decision["campaign_run_id"]) == (
+        "promotion", "1", parent.info.run_id,
     )  # fmt: skip
 
 
@@ -94,18 +134,39 @@ def report_rows(run: Any) -> int:
 
 def test_second_campaign_measures_drift_and_compares_with_production(world: TrainWorld) -> None:
     _, first = campaign(world)
-    assert first is not None
-    world.tracker.client.set_registered_model_alias("atp-tests", "production", "1")
-    world.tracker.client.set_model_version_tag("atp-tests", "1", "features_version", "1")
-    world.source.frame = synthetic_matches(weeks=180, seed=8)  # une saison de plus, d'autres joueurs
-    state, second = campaign(world)
+    assert first is not None and first.production_version == "1"
+    world.source.frame = synthetic_matches(
+        weeks=180, seed=8, surface_effect=1.0
+    )  # une saison de plus, d'autres joueurs
+    state, second = campaign(world, promotion={"max_psi": 10.0, "max_segment_regression": 1.0})
     assert state.is_completed() and second is not None
     assert second.registered_version == "2"
-    assert second.production_comparison == "version 1"
+    assert second.production_comparison == "v1"
     parent = world.tracker.client.get_run(second.campaign_run_id)
     assert "drift/max_psi" in parent.data.metrics
     assert "production/best_minus_production_test_log_loss" in parent.data.metrics
     assert world.tracker.read_json_artifact(second.campaign_run_id, "data/drift_vs_previous.json") is not None
+    gate = world.tracker.read_json_artifact(second.campaign_run_id, "decision/gate.json")
+    assert gate is not None and gate["compared_to_version"] == "1"
+    aliases = world.registry.aliases()
+    if second.gate_status == "passed":  # le verdict dépend des données ; les alias doivent le refléter
+        assert aliases == {"production": "2", "previous": "1"}
+    else:
+        assert aliases == {"production": "1", "staging": "2"}
+
+
+def test_a_worse_model_is_registered_but_refused(world: TrainWorld) -> None:
+    campaign(world)
+    weak = (CandidateGrid(model=ModelKind.LOGISTIC_REGRESSION, grid={"C": (0.00001,)}),)
+    state, report = campaign(world, candidates=weak)
+    assert state.is_completed() and report is not None  # un rejet est une décision, pas un échec
+    assert (report.registered_version, report.gate_status, report.production_version) == ("2", "failed", "1")
+    assert "Elo pur" in report.gate_reason and "refusée" in report.decision
+    assert world.registry.aliases() == {"production": "1", "staging": "2"}
+    tags = world.registry.get("2").tags
+    assert (tags["lifecycle"], tags["gate_status"], tags["compared_to_version"]) == ("rejected", "failed", "1")
+    assert float(tags["delta_log_loss"]) > 0
+    assert [d["event"] for d in world.decisions()] == ["promotion", "rejet"]
 
 
 def test_a_failing_candidate_does_not_stop_the_campaign(world: TrainWorld) -> None:
@@ -146,6 +207,6 @@ def test_unreachable_mlflow_stops_before_any_computation(monkeypatch: pytest.Mon
     monkeypatch.setattr(train, "dependency_factory", unreachable)
     path = tmp_path / "train.yaml"
     path.write_text(yaml.safe_dump(small_config().model_dump(mode="json")), encoding="utf-8")
-    state = train.training_flow(str(path), None, 1, return_state=True)
+    state = train.training_flow(str(path), None, 1, None, return_state=True)
     assert state.is_failed()
     assert "serveur MLflow indisponible" in str(state.message)

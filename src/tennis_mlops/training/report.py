@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,11 +22,13 @@ from mlflow.models.model import ModelInfo
 from sklearn.metrics import confusion_matrix, roc_curve
 
 from tennis_mlops.features import FEATURE_COLUMNS, FEATURES_VERSION
+from tennis_mlops.registry.events import RegistryEvent
+from tennis_mlops.registry.gate import GateDecision
+from tennis_mlops.registry.model_registry import RegisteredVersion
 from tennis_mlops.training import html_report as h
 from tennis_mlops.training.config import TrainConfig
 from tennis_mlops.training.dataset import Dataset
 from tennis_mlops.training.evaluate import Array, Evaluation, ProbabilityModel, calibration_table
-from tennis_mlops.training.registry import RegisteredVersion
 from tennis_mlops.training.split import Split
 from tennis_mlops.training.tracking import MlflowTracker
 from tennis_mlops.training.trainer import FittedCandidate
@@ -370,7 +372,9 @@ def campaign_html(summary: CampaignSummary, table: pd.DataFrame, figures: Mappin
     best, ctx, dataset, split = summary.best, summary.context, summary.dataset, summary.split
     elo = summary.baselines["elo"].metrics if "elo" in summary.baselines else {"test": best.test}
     key_figures = [
-        h.Card("candidat retenu", best.name, f"{len(summary.results)} candidats, {len(summary.failed)} en échec"),
+        h.Card(
+            "candidat retenu", best.name, f"{_count(len(summary.results), 'candidat')}, {len(summary.failed)} en échec"
+        ),
         h.Card(f"{metric} (validation)", f"{best.validation[metric]:.4f}", "sert à choisir"),
         h.Card(
             f"{metric} (test)",
@@ -378,7 +382,12 @@ def campaign_html(summary: CampaignSummary, table: pd.DataFrame, figures: Mappin
             f"{best.test[metric] - elo['test'][metric]:+.4f} contre l'Elo pur",
             best.test[metric] < elo["test"][metric],
         ),
-        h.Card("registre", f"{summary.registered.name} v{summary.registered.version}", "lifecycle=candidate"),
+        h.Card(
+            "registre",
+            f"{summary.registered.name} v{summary.registered.version}",
+            _decision_label(summary),
+            None if summary.decision is None else summary.decision.passed,
+        ),
         h.Card(
             "entraînement",
             f"{summary.durations['duration/training_wall_s']:.1f} s",
@@ -457,7 +466,7 @@ def campaign_html(summary: CampaignSummary, table: pd.DataFrame, figures: Mappin
         h.section(
             "Le retenu dans le temps", f'<img class="wide" alt="mois" src="{h.figure_src(figures["monthly_best"])}">'
         ),
-        h.section("Comparaison avec la production", h.paragraph(h.esc(summary.comparison))),
+        _decision_section(summary),
         h.section("Données", h.table(data)),
         h.section(
             "Dérive par rapport à la campagne précédente",
@@ -471,7 +480,8 @@ def campaign_html(summary: CampaignSummary, table: pd.DataFrame, figures: Mappin
         ),
         h.section("Reproductibilité", h.table(reproducibility)),
     ]
-    lead = f"{len(summary.results)} candidats entraînés sur les matchs validés jusqu'au {split.end}."
+    trained = "entraînés" if len(summary.results) > 1 else "entraîné"
+    lead = f"{_count(len(summary.results), 'candidat')} {trained} sur les matchs validés jusqu'au {split.end}."
     return h.page("Campagne d'entraînement", lead, body)
 
 
@@ -506,6 +516,7 @@ class CandidateResult:
     test: dict[str, float]
     fit_seconds: float
     monthly: pd.DataFrame
+    segments: pd.DataFrame = field(default_factory=pd.DataFrame)  # test, toutes dimensions (règle de mise en service)
 
 
 @dataclass(frozen=True)
@@ -526,6 +537,8 @@ class CampaignSummary:
     drift: Mapping[str, Any]
     context: Mapping[str, str]
     failed: Sequence[str] = ()
+    decision: GateDecision | None = None
+    event: RegistryEvent | None = None
 
     @property
     def fit_sum(self) -> float:
@@ -571,6 +584,11 @@ class CampaignSummary:
             values[f"production/best_minus_production_test_{metric}"] = (
                 self.best.test[metric] - self.production.metrics["test"][metric]
             )
+        if self.decision is not None:
+            values["gate/passed"] = float(self.decision.passed)
+            values["gate/rules_failed"] = float(len(self.decision.failed_rules))
+            if self.decision.delta_log_loss is not None:
+                values["gate/delta_log_loss"] = self.decision.delta_log_loss
         wall = self.durations["duration/training_wall_s"]
         values.update(
             {
@@ -728,9 +746,63 @@ class Reporter:
                 "registry.model": summary.registered.name,
                 "registry.version": summary.registered.version,
                 "production.comparison": summary.comparison,
+                **_decision_tags(summary),
             },
         )
+        if summary.decision is not None:
+            t.log_dict(run_id, summary.decision.as_dict(), "decision/gate.json")
+            t.log_frame(run_id, summary.decision.table(), "decision/rules.csv")
         t.log_text(run_id, campaign_html(summary, table, figures, metric), "rapport_campagne.html")
+
+
+def _count(n: int, noun: str) -> str:
+    """« 1 candidat », « 8 candidats »."""
+    return f"{n} {noun}{'s' if n > 1 else ''}"
+
+
+def _decision_label(summary: CampaignSummary) -> str:
+    if summary.event is None:
+        return "lifecycle=candidate (pas de décision)"
+    if summary.decision is not None and summary.decision.passed:
+        return "mise en production"
+    return "refusée : production inchangée"
+
+
+def _decision_tags(summary: CampaignSummary) -> dict[str, str]:
+    if summary.decision is None or summary.event is None:
+        return {}
+    return {
+        "gate.status": summary.decision.status.value,
+        "gate.reason": summary.decision.reason[:5000],
+        "registry.production_version": summary.event.production_after or "",
+    }
+
+
+def _decision_section(summary: CampaignSummary) -> str:
+    """Règle de mise en service : verdict, règle par règle, et ce qui a bougé dans le registre."""
+    if summary.decision is None or summary.event is None:
+        return h.section("Décision de mise en service", h.paragraph(h.esc(summary.comparison)))
+    decision, event, version = summary.decision, summary.event, f"v{summary.registered.version}"
+    if decision.passed and event.production_before:
+        verdict = f"<strong>Mise en production</strong> : {version} remplace v{h.esc(event.production_before)}"
+    elif decision.passed:
+        verdict = f"<strong>Mise en production</strong> : {version} est la première version servie"
+    else:
+        kept = f"v{h.esc(event.production_before)}" if event.production_before else "aucune version"
+        verdict = (
+            f"<strong>Refusée</strong> : la production reste {kept} ; {version} passe en observation (alias "
+            "<code>staging</code>)"
+        )
+    return h.section(
+        "Décision de mise en service",
+        h.paragraph(verdict + "."),
+        h.table(decision.table(), tones={"OK": "good", "ÉCHEC": "bad", "sans objet": "muted"}),
+        h.paragraph(
+            "Règles et seuils : <code>configs/promotion.yaml</code> ; stratégie de tagging : "
+            "<code>docs/TAGGING.md</code>. « sans objet » : la règle n'a encore rien à comparer (pas de production, "
+            "première campagne)."
+        ),
+    )
 
 
 def _log_monthly(tracker: MlflowTracker, run_id: str, monthly: pd.DataFrame, section: str) -> None:

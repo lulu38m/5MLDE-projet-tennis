@@ -46,9 +46,14 @@ make train      # campagne d'entraînement en parallèle, tracée dans MLflow, m
 | `make lots` | Derniers lots ingérés : statut, volumes, contrôles en échec |
 | `make gx-docs` | Rapports HTML de Great Expectations |
 | `make db` | Console SQL sur la base du projet |
-| `make train [WORKERS=8]` | Campagne d'entraînement : grille de candidats en parallèle, MLflow, registre |
+| `make train [WORKERS=8]` | Campagne d'entraînement : grille de candidats en parallèle, MLflow, registre, décision de mise en service |
 | `make train-seq` | La même campagne, un candidat à la fois (référence pour mesurer le gain du parallélisme) |
+| `make train-weak` | Campagne volontairement mauvaise : enregistrée puis refusée par la règle de mise en service |
 | `make mlflow` | Ouvre l'interface MLflow |
+| `make registry` | Versions du modèle, alias (`production`, `previous`, `staging`), décisions |
+| `make promote VERSION=3 REASON="…"` | Mise en production manuelle, raison obligatoire |
+| `make rollback REASON="…"` | Revient à la version `previous` |
+| `make trace [VERSION=3]` | Chaîne de traçabilité d'une version : run MLflow → run Prefect → lots → source |
 
 ## Organisation du code
 
@@ -58,12 +63,13 @@ make train      # campagne d'entraînement en parallèle, tracée dans MLflow, m
 | `src/tennis_mlops/ingestion/` | Client HTTP de la source, lots, stockage PostgreSQL, archive brute |
 | `src/tennis_mlops/validation/` | Suites Great Expectations et expectations custom |
 | `src/tennis_mlops/features/` | `FeatureBuilder` : features calculées avant chaque match, partagées entraînement / API |
-| `src/tennis_mlops/training/` | Jeu de données, découpage temporel, pipelines, évaluation, suivi MLflow, registre |
+| `src/tennis_mlops/training/` | Jeu de données, découpage temporel, pipelines, évaluation, suivi MLflow |
+| `src/tennis_mlops/registry/` | Registre : tags, règle de mise en service, promotion, rollback, journal, rechargement par alias |
 | `src/tennis_mlops/flows/` | Flows Prefect (`ingest.py`, `train.py`) |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md` |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback) |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -131,7 +137,7 @@ Le flow Prefect `entrainement-atp` rejoue l'historique validé pour calculer les
 l'état de la veille** (classement, Elo global et par surface, forme, face-à-face…), découpe le temps en
 entraînement / validation / test, puis entraîne une grille de candidats **en parallèle** (une task Prefect par
 méthode : `DatasetBuilder.build` → `TemporalSplitter.split` → `PipelineFactory.create` → `Trainer.fit` →
-`Evaluator.evaluate` → `Reporter.log` → `Registrar.register`).
+`Evaluator.evaluate` → `Reporter.log` → `ModelRegistry.register` → règle de mise en service → `Promoter.apply`).
 
 - **MLflow** : un run parent par campagne (données, config, baselines, comparaison), un run enfant par candidat
   (métriques globales et par segment, coûts, graphiques, fiche modèle, pipeline complet rechargeable).
@@ -139,7 +145,22 @@ méthode : `DatasetBuilder.build` → `TemporalSplitter.split` → `PipelineFact
   `rapport_campagne.html`) ; l'onglet « Model metrics » range les métriques par section et trace la performance
   mois par mois et les courbes d'apprentissage.
 - **Choix** sur la validation, **bilan** sur le test, comparé aux baselines Elo et classement.
-- **Registre** : le candidat retenu devient une nouvelle version de `atp-winner` (`lifecycle=candidate`) ; la mise
-  en service (alias `production`) est l'objet de la phase 5.
+- **Registre** : le candidat retenu devient une nouvelle version de `atp-winner`.
 
 Features, protocole, traçabilité et mesures : [`docs/ENTRAINEMENT.md`](docs/ENTRAINEMENT.md).
+
+## Registre et mise en service
+
+Le candidat retenu et le modèle en production sont jugés sur le même test récent. L'alias **`production`** (lu par
+l'API : `models:/atp-winner@production`) n'est déplacé que si toutes les règles de `configs/promotion.yaml`
+passent : données validées, Elo pur et « mieux classé » battus, au moins aussi bon que la production, aucune surface
+dégradée, pas de dérive forte. Sinon la version est refusée (`lifecycle=rejected`, raison en tag) et gardée en
+observation (`staging`).
+
+- **Rollback** en une commande, qui ne dépend que de MLflow : `make rollback REASON="…"` (`production` ←
+  `previous`) ; l'API suivra l'alias sans redéploiement.
+- **Chaque décision est tracée** : tags de la version, section « Décision de mise en service » du rapport de
+  campagne, et un run par décision dans l'expérience `atp-winner-decisions`.
+- **Traçabilité** : `make trace` remonte de la version au run MLflow, au run Prefect, aux lots validés et à la source.
+
+Alias, tags, règle, cycle de vie, démo : [`docs/TAGGING.md`](docs/TAGGING.md).

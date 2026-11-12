@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import platform
 import subprocess
 import tempfile
@@ -261,6 +262,9 @@ class MlflowTracker:
 # --------------------------------------------------------------------------- reproductibilité
 
 
+IMAGE_COMMIT_ENV = "TENNIS_GIT_COMMIT"  # posé par le Dockerfile (`make up` passe `git rev-parse HEAD`)
+
+
 def code_info(root: Path) -> dict[str, str]:
     """Révision Git (et état propre / modifié), Python, empreinte de `uv.lock` : de quoi rejouer la campagne."""
     info = {
@@ -272,10 +276,13 @@ def code_info(root: Path) -> dict[str, str]:
     lock = root / "uv.lock"
     info["uv_lock.sha256"] = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else "absent"
     commit = _git(root, "rev-parse", "HEAD")
+    if commit:
+        info["git.dirty"] = str(bool(_git(root, "status", "--porcelain", "--untracked-files=no")))
+    elif commit := os.environ.get(IMAGE_COMMIT_ENV, "").strip():  # worker Docker : révision gravée au build
+        info["git.dirty"] = "inconnu (image Docker)"
     info["git.commit"] = commit or "inconnu (pas de dépôt Git)"
     if commit:
         info["mlflow.source.git.commit"] = commit
-        info["git.dirty"] = str(bool(_git(root, "status", "--porcelain", "--untracked-files=no")))
     return info
 
 

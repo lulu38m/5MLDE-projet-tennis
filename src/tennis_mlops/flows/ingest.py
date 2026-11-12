@@ -9,10 +9,14 @@ GET /admin/clock ─► amorçage 2010→2015 (une fois) ─► GET /tournaments
 
 - **Une task par appel HTTP**, chacune avec ses retries (backoff) : seule une panne (`503`, timeout, connexion) est
   retentée ; un `4xx` ne l'est jamais.
-- **Lot refusé** : archivé en quarantaine, aucun match stocké, flow en échec (`Failed`) → l'entraînement ne sera pas
-  déclenché (phase 6). Les lots valides du même passage sont quand même stockés.
+- **Lot refusé** : archivé en quarantaine, aucun match stocké, flow en échec (`Failed`) → alerte. Les lots valides
+  du même passage sont quand même stockés.
 - **Source indisponible** après tous les essais : flow terminé à l'état « Dégradé ». Les données déjà ingérées restent
   utilisables, le watermark ne bouge pas, rien n'est perdu.
+
+- **Journal et déclenchement** : chaque passage écrit ses faits marquants dans `pipeline_events` et, au-delà de
+  `orchestration.training_trigger_matches` nouveaux matchs, émet l'événement `tennis.training.requested` auquel
+  réagit l'automation qui lance l'entraînement (phase 6).
 
 Lancement : `make ingest` (ou `python -m tennis_mlops.flows.ingest`).
 """
@@ -22,7 +26,7 @@ from __future__ import annotations
 import argparse
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -32,6 +36,7 @@ from typing import Any, Self
 from prefect import State, Task, flow, get_run_logger, task
 from prefect.cache_policies import NO_CACHE
 from prefect.client.schemas.objects import TaskRun
+from prefect.events import emit_event
 from prefect.runtime import flow_run
 from prefect.states import Completed
 from pydantic import BaseModel
@@ -42,6 +47,8 @@ from tennis_mlops.ingestion.archive import LotArchive
 from tennis_mlops.ingestion.client import MockSourceClient, SourcePayload
 from tennis_mlops.ingestion.lots import Lot, bootstrap_lot, tournament_lot
 from tennis_mlops.ingestion.store import IngestionStore
+from tennis_mlops.orchestration.events import EventKind, PipelineEvent, PipelineEvents, Severity
+from tennis_mlops.orchestration.trigger import Emitter, TrainingTrigger, TriggerDecision
 from tennis_mlops.validation.suites import RankGapReference
 from tennis_mlops.validation.validator import LotValidator, ValidationReport
 
@@ -70,13 +77,14 @@ class IngestionReport(BaseModel):
     rows_inserted: int = 0
     warnings: list[str] = []
     detail: str | None = None
+    training_requested: bool = False
 
     def summary(self) -> str:
         """Une ligne pour les logs."""
         return (
             f"{self.status.value} : {len(self.lots_valid)} lot(s) stocké(s), {len(self.lots_quarantined)} en "
             f"quarantaine, {self.rows_inserted} match(s) ajouté(s), watermark {self.watermark_before} → "
-            f"{self.watermark_after}"
+            f"{self.watermark_after}" + (" ; réentraînement demandé" if self.training_requested else "")
         )
 
 
@@ -114,6 +122,7 @@ def default_dependencies(config: ProjectConfig, settings: Settings, root: Path) 
 
 DependencyFactory = Callable[[ProjectConfig, Settings, Path], IngestionDependencies]
 dependency_factory: DependencyFactory = default_dependencies
+training_event_emitter: Emitter = emit_event  # remplacé dans les tests
 
 
 # --------------------------------------------------------------------------- tasks : un appel HTTP = une task
@@ -191,9 +200,70 @@ def store_lot(deps: IngestionDependencies, lot: Lot, report: ValidationReport, p
 def quarantine_lot(deps: IngestionDependencies, lot: Lot, report: ValidationReport) -> str:
     """Lot refusé : archivé à part et tracé, rien n'est stocké."""
     folder = deps.archive.save(lot, report)
-    deps.store.save_quarantined_lot(lot, report, str(folder), _flow_run_id())
+    run_id = _flow_run_id()
+    deps.store.save_quarantined_lot(lot, report, str(folder), run_id)
     get_run_logger().error("%s en quarantaine : %s", lot.lot_id, folder)
+    PipelineEvents(deps.store.engine).record(quarantine_event(lot, report, folder, run_id))
     return str(folder)
+
+
+def quarantine_event(lot: Lot, report: ValidationReport, folder: Path, flow_run_id: str | None) -> PipelineEvent:
+    """Ce que la carte « lot refusé » affiche : tournoi, volumes, contrôles en échec (structurés)."""
+    names = lot.frame["tourney_name"].dropna().astype(str).tolist() if "tourney_name" in lot.frame else []
+    payload = {
+        "lot_id": lot.lot_id,
+        "tourney_name": names[0] if names else None,
+        "tourney_level": lot.tourney_level,
+        "end_date": lot.end_date,
+        "rows_received": lot.rows,
+        "rows_expected": lot.expected_rows,
+        "archive": "/".join(folder.parts[-3:]) + "/",  # state/quarantine/<lot>/ : lisible sur tous les postes
+        "failed_checks": [asdict(check) for check in report.failures],
+    }
+    return PipelineEvent(
+        EventKind.LOT_QUARANTINED,
+        Severity.FAILURE,
+        f"Lot {lot.lot_id} en quarantaine",
+        " ; ".join(check.describe() for check in report.failures),
+        lot.simulated_now,
+        flow_run_id,
+        lot.lot_id,
+        payload=payload,
+    )
+
+
+@task(name="journal et déclenchement de l'entraînement", cache_policy=NO_CACHE)
+def follow_up(store: IngestionStore, config: ProjectConfig, report: IngestionReport) -> TriggerDecision:
+    """Faits marquants dans `pipeline_events`, puis demande d'entraînement si assez de nouveaux matchs."""
+    events, run_id = PipelineEvents(store.engine), _flow_run_id()  # lots refusés : journalisés par `quarantine_lot`
+    if report.lots_valid:
+        events.record(
+            PipelineEvent(
+                EventKind.INGESTION_COMPLETED,
+                Severity.INFO,
+                f"Ingestion : {len(report.lots_valid)} lot(s), {report.rows_inserted} match(s)",
+                report.summary(),
+                report.simulated_now,
+                run_id,
+                payload={"lots": report.lots_valid, "rows_inserted": report.rows_inserted},
+            )
+        )
+    trigger = TrainingTrigger(store, events, config.orchestration.training_trigger_matches, training_event_emitter)
+    decision = trigger.check(run_id, report.simulated_now)
+    get_run_logger().info(decision.summary())
+    return decision
+
+
+def _record_degraded(store: IngestionStore, report: IngestionReport) -> None:
+    PipelineEvents(store.engine).record(
+        PipelineEvent(
+            EventKind.INGESTION_DEGRADED,
+            Severity.WARNING,
+            "Ingestion dégradée : source injoignable",
+            report.detail or "",
+            flow_run_id=_flow_run_id(),
+        )
+    )
 
 
 def _flow_run_id() -> str | None:
@@ -223,7 +293,10 @@ def ingest_flow(config_path: str | None = None) -> IngestionReport | State[Any]:
                 detail=str(exc),
             )
             get_run_logger().warning("Source indisponible après %d essais : %s", config.ingestion.retries + 1, exc)
+            _record_degraded(deps.store, report)
             return Completed(name=DEGRADED_STATE, message=f"Source indisponible : {exc}", data=report)
+        decision = follow_up(deps.store, config, report)
+        report.training_requested = decision.requested
     get_run_logger().info(report.summary())
     if report.status is IngestionStatus.QUARANTINE:
         msg = f"lot(s) en quarantaine : {', '.join(report.lots_quarantined)} — {report.summary()}"
@@ -240,8 +313,9 @@ def _ingest(config: ProjectConfig, deps: IngestionDependencies, watermark: date)
     pause = config.demo.sleep_s
     simulation = config.simulation
     now = fetch_clock.with_options(**options)(deps.client)
-    report = IngestionReport(status=IngestionStatus.OK, simulated_now=now, watermark_before=watermark,
-                             watermark_after=watermark)  # fmt: skip
+    report = IngestionReport(
+        status=IngestionStatus.OK, simulated_now=now, watermark_before=watermark, watermark_after=watermark
+    )
     since = watermark
 
     if since < simulation.replay_start and since < now:

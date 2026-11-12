@@ -2,7 +2,8 @@
 
 Le flow Prefect `ingestion-atp` tire (mode **pull**) les tournois terminés depuis `mock_source`, contrôle chaque lot
 avec Great Expectations et ne stocke dans PostgreSQL que ce qui passe. Un lot refusé part en quarantaine, le flow
-échoue et l'entraînement (phase 6) ne sera pas déclenché.
+échoue (une carte Teams, voir [`ALERTES.md`](ALERTES.md)) et le lot ne compte pas pour le déclenchement de
+l'entraînement ([`ORCHESTRATION.md`](ORCHESTRATION.md)).
 
 ## Lancer
 

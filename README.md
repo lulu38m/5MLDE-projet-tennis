@@ -16,9 +16,10 @@ qualité, le réentraînement, la mise en service et la supervision.
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow (`make urls` affiche les adresses)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, worker, alertes (`make urls`)
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
+make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraînement sur événement, alertes Teams
 ```
 
 ## Commandes
@@ -54,6 +55,11 @@ make train      # campagne d'entraînement en parallèle, tracée dans MLflow, m
 | `make promote VERSION=3 REASON="…"` | Mise en production manuelle, raison obligatoire |
 | `make rollback REASON="…"` | Revient à la version `previous` |
 | `make trace [VERSION=3]` | Chaîne de traçabilité d'une version : run MLflow → run Prefect → lots → source |
+| `make demo` / `make demo-stop` | Lance / met en pause la simulation planifiée (un pas de 7 jours toutes les 2 min) |
+| `make demo-status` | Déploiements Prefect, worker, derniers runs |
+| `make simulate DAYS=14` | Un seul pas de simulation, sans planning |
+| `make alerts` | Dernières alertes : envoyée, filtrée, répétée, sans webhook, en échec |
+| `make alert-preview` / `make alert-test` | Cartes Teams d'exemple en JSON / UNE carte « 🧪 TEST » au webhook |
 
 ## Organisation du code
 
@@ -65,11 +71,13 @@ make train      # campagne d'entraînement en parallèle, tracée dans MLflow, m
 | `src/tennis_mlops/features/` | `FeatureBuilder` : features calculées avant chaque match, partagées entraînement / API |
 | `src/tennis_mlops/training/` | Jeu de données, découpage temporel, pipelines, évaluation, suivi MLflow |
 | `src/tennis_mlops/registry/` | Registre : tags, règle de mise en service, promotion, rollback, journal, rechargement par alias |
-| `src/tennis_mlops/flows/` | Flows Prefect (`ingest.py`, `train.py`) |
+| `src/tennis_mlops/flows/` | Flows Prefect (`ingest.py`, `train.py`, `simulation.py`) |
+| `src/tennis_mlops/orchestration/` | Déploiements, automations, déclenchement par événement, journal `pipeline_events` |
+| `src/tennis_mlops/alerts/` | Cartes Teams (Adaptive Cards) et service d'alertes `alert_sink` |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback) |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md` |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -164,3 +172,19 @@ observation (`staging`).
 - **Traçabilité** : `make trace` remonte de la version au run MLflow, au run Prefect, aux lots validés et à la source.
 
 Alias, tags, règle, cycle de vie, démo : [`docs/TAGGING.md`](docs/TAGGING.md).
+
+## Orchestration et alertes
+
+`make demo` lance une simulation planifiée dans Prefect : toutes les 2 minutes, le temps avance d'une semaine et
+l'ingestion récupère les tournois terminés. Au-delà de 200 nouveaux matchs validés, l'ingestion émet l'événement
+`tennis.training.requested` et une **automation** lance une campagne d'entraînement, soumise à la même règle de mise
+en service. Tout tourne dans le worker de la stack ; déploiements et automations sont créés à chaque `make up`.
+
+- **Une alerte par incident**, en carte Teams : flow en échec après ses retries, lot refusé par Great Expectations,
+  source injoignable, rollback. Un incident qui persiste n'est pas renvoyé toutes les 2 minutes.
+- **Webhook secret** : `TENNIS_TEAMS_WEBHOOK_URL` dans `.env` uniquement ; sans lui, les cartes sont gardées dans
+  l'historique (`make alerts`) sans être envoyées.
+- **Chronologie** : chaque fait marquant (lot validé ou refusé, demande d'entraînement, décision, alerte) est inscrit
+  dans la table `pipeline_events`, pour les annotations Grafana.
+
+Détails : [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) et [`docs/ALERTES.md`](docs/ALERTES.md).

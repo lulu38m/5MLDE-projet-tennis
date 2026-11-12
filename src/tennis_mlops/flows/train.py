@@ -19,6 +19,9 @@ DatasetBuilder.build ─► TemporalSplitter.split ─► profil / dérive ─�
 - **Sélection** sur la validation, **bilan** sur le test : le test ne sert jamais à choisir.
 - **Mise en service** : le retenu et la production sont jugés sur le même test ; l'alias `production` n'est déplacé
   que si toutes les règles passent (docs/TAGGING.md). Un rejet n'est pas un échec du flow : c'est une décision.
+- **Cache** : le jeu de features est mis en cache par Prefect, clé = empreinte des matchs en base + réglages et
+  version des features. Relancer sans nouvelles données (`make train-weak` après `make train`) ne le recalcule pas.
+- **Annonce** (phase 6) : la décision est inscrite dans `pipeline_events` et transmise au service d'alertes.
 
 Lancement : `make train` (ou `python -m tennis_mlops.flows.train`).
 """
@@ -26,11 +29,13 @@ Lancement : `make train` (ou `python -m tennis_mlops.flows.train`).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import resource
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -38,16 +43,20 @@ import pandas as pd
 import yaml
 from prefect import State, flow, get_run_logger, task, unmapped
 from prefect.cache_policies import NO_CACHE
+from prefect.context import TaskRunContext
 from prefect.futures import PrefectFuture, wait
 from prefect.runtime import flow_run
 from prefect.task_runners import TaskRunner, ThreadPoolTaskRunner
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 
+from tennis_mlops.alerts.client import AlertSinkClient
 from tennis_mlops.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, ProjectConfig, Settings
 from tennis_mlops.features import FEATURES_VERSION
 from tennis_mlops.ingestion.store import IngestionStore
 from tennis_mlops.log import quiet_training_noise
+from tennis_mlops.orchestration.decisions import DecisionAnnouncer
+from tennis_mlops.orchestration.events import PipelineEvents
 from tennis_mlops.registry.events import RegistryEvent
 from tennis_mlops.registry.gate import (
     DEFAULT_PROMOTION_CONFIG_PATH,
@@ -74,6 +83,7 @@ from tennis_mlops.training.trainer import FittedCandidate, Trainer
 from tennis_mlops.validation.suites import SUITES_VERSION
 
 FLOW_NAME = "entrainement-atp"
+DATASET_CACHE_DAYS = 7
 
 
 class CampaignReport(BaseModel):
@@ -121,16 +131,19 @@ class CampaignReport(BaseModel):
 
 @dataclass
 class TrainingDependencies:
-    """Source des matchs et serveur MLflow ; les tests fournissent les leurs."""
+    """Source des matchs, serveur MLflow et annonce des décisions ; les tests fournissent les leurs."""
 
     source: MatchSource
     tracker: MlflowTracker
+    announcer: DecisionAnnouncer | None = None  # None : décision ni journalisée dans la base, ni notifiée
 
 
 def default_dependencies(config: TrainConfig, settings: Settings) -> TrainingDependencies:
-    """PostgreSQL (matchs validés) et serveur MLflow de la stack."""
+    """PostgreSQL (matchs validés, journal des événements), serveur MLflow et service d'alertes de la stack."""
     tracker = MlflowTracker(str(settings.mlflow_tracking_uri), config.experiment)
-    return TrainingDependencies(source=IngestionStore.from_url(settings.sqlalchemy_url()), tracker=tracker)
+    store = IngestionStore.from_url(settings.sqlalchemy_url())
+    announcer = DecisionAnnouncer(PipelineEvents(store.engine), AlertSinkClient(str(settings.alert_sink_url)))
+    return TrainingDependencies(source=store, tracker=tracker, announcer=announcer)
 
 
 DependencyFactory = Callable[[TrainConfig, Settings], TrainingDependencies]
@@ -140,9 +153,27 @@ dependency_factory: DependencyFactory = default_dependencies
 # --------------------------------------------------------------------------- tasks : données
 
 
-@task(name="DatasetBuilder.build", cache_policy=NO_CACHE)
+def dataset_cache_key(_: TaskRunContext, parameters: dict[str, Any]) -> str | None:
+    """Mêmes matchs en base (empreinte), mêmes réglages et même version des features → même jeu, pas de recalcul.
+
+    Une source sans empreinte (tests) n'est jamais mise en cache.
+    """
+    fingerprint = getattr(parameters["source"], "fingerprint", None)
+    if not callable(fingerprint):
+        return None
+    config: TrainConfig = parameters["config"]
+    features = hashlib.sha256(config.features.model_dump_json().encode()).hexdigest()[:12]
+    return f"dataset-{FEATURES_VERSION}-{features}-{fingerprint()}"
+
+
+@task(
+    name="DatasetBuilder.build",
+    cache_key_fn=dataset_cache_key,
+    cache_expiration=timedelta(days=DATASET_CACHE_DAYS),
+    persist_result=True,
+)
 def build_dataset(source: MatchSource, config: TrainConfig, pause_s: float) -> Dataset:
-    """Matchs validés → features calculées avant chaque match."""
+    """Matchs validés → features calculées avant chaque match (mis en cache par Prefect, voir `dataset_cache_key`)."""
     time.sleep(pause_s)
     dataset = DatasetBuilder(source, config.features).build()
     get_run_logger().info("%d matchs joués → %d lignes de features (%s → %s) en %.1f s", dataset.matches_loaded,
@@ -334,6 +365,37 @@ def apply_decision(
     return event
 
 
+@task(name="annonce de la décision", cache_policy=NO_CACHE)
+def announce_decision(announcer: DecisionAnnouncer, event: RegistryEvent, metrics: Mapping[str, Any]) -> None:
+    """`pipeline_events` (annotation Grafana) et service d'alertes (carte Teams si la production change)."""
+    logger = get_run_logger()
+    for line in announcer.announce(event, metrics, _flow_run_id()):
+        problem = line.startswith(("attention", "alerte non transmise", "alerte : envoi Teams en échec"))
+        (logger.warning if problem else logger.info)(line)
+
+
+def campaign_metrics(
+    inputs: GateInputs, best: CandidateResult, candidates: int, split: Split, experiment_id: str
+) -> dict[str, Any]:
+    """Les chiffres de la carte « nouveau modèle en production » (tous mesurés sur le même test)."""
+    elo = inputs.baselines.get("elo")
+    return {
+        "log_loss": inputs.candidate.log_loss,
+        "accuracy": inputs.candidate.accuracy,
+        "candidate": best.name,
+        "candidates": candidates,
+        "data_end": split.end.isoformat(),
+        "experiment_id": experiment_id,
+        "elo_log_loss": elo.log_loss if elo else None,
+        "production_log_loss": inputs.production.log_loss if inputs.production else None,
+    }
+
+
+def _flow_run_id() -> str | None:
+    run_id = flow_run.get_id()
+    return str(run_id) if run_id else None
+
+
 # --------------------------------------------------------------------------- flow
 
 
@@ -404,7 +466,11 @@ def _campaign(
 
     progress.step = "DatasetBuilder.build"
     started = time.perf_counter()
-    dataset = build_dataset(deps.source, config, pause)
+    built = build_dataset(deps.source, config, pause, return_state=True)
+    dataset = built.result()
+    cached = built.name == "Cached"
+    if cached:
+        logger.info("jeu d'entraînement repris du cache Prefect : aucun nouveau match depuis la campagne précédente")
     timed("dataset", started)
     progress.step = "TemporalSplitter.split"
     started = time.perf_counter()
@@ -414,7 +480,7 @@ def _campaign(
                                      "data.rows": len(dataset.frame), "data.first_date": dataset.first_date,
                                      "data.last_date": dataset.last_date,
                                      "data.dataset_versions": ",".join(dataset.dataset_versions),
-                                     "data.players": _players(dataset.frame),
+                                     "data.players": _players(dataset.frame), "data.cached": cached,
                                      "data.tournaments": int(dataset.frame["tourney_id"].nunique())})  # fmt: skip
     progress.step = "profil, dérive et baselines"
     started = time.perf_counter()
@@ -481,6 +547,9 @@ def _campaign(
     decision = decide_promotion(Gate(campaign.policy), inputs)
     journal = DecisionJournal.for_model(tracker.tracking_uri, config.registered_model)
     event = apply_decision(Promoter(registry), journal, registered.version, decision, campaign_id)
+    if deps.announcer is not None:
+        metrics = campaign_metrics(inputs, best, len(specs), split, tracker.experiment_id)
+        announce_decision(deps.announcer, event, metrics)
     timed("decision", started)
 
     progress.step = "bilan"
@@ -584,7 +653,7 @@ def _log_configuration(
 
 def _campaign_tags(settings: Settings) -> dict[str, str]:
     run_id = flow_run.get_id()
-    ui = str(settings.prefect_api_url).rstrip("/").removesuffix("/api")
+    ui = str(settings.prefect_ui_url).rstrip("/")  # l'adresse vue du navigateur, pas celle du conteneur
     return {
         "kind": "campaign",
         "features_version": FEATURES_VERSION,

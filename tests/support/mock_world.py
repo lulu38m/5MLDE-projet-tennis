@@ -121,6 +121,7 @@ def write_project_config(root: Path, *, replay_start: str = "2019-02-01", state_
         ("retry_delays_s: [1, 2, 4]", "retry_delays_s: [0, 0, 0]"),
         ("drift_min_history: 20", "drift_min_history: 3"),
         ("state_dir: state", f"state_dir: {state_dir or root / 'state'}"),
+        ("training_trigger_matches: 200", "training_trigger_matches: 5"),
     ]:
         assert old in text, old
         text = text.replace(old, new)

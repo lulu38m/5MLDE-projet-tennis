@@ -1,16 +1,20 @@
 """Campagnes complètes : données synthétiques en mémoire, MLflow local (SQLite), serveur Prefect de test."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 import yaml
 from prefect import State
+from prefect.settings import PREFECT_LOCAL_STORAGE_PATH, temporary_settings
 
 from tennis_mlops.flows import train
 from tennis_mlops.flows.train import CampaignReport, TrainingDependencies
+from tennis_mlops.orchestration.decisions import DecisionAnnouncer
+from tennis_mlops.registry.events import RegistryEvent
 from tennis_mlops.registry.gate import PromotionPolicy
 from tennis_mlops.registry.model_registry import ModelRegistry
 from tennis_mlops.training.config import CandidateGrid, ModelKind, SplitConfig, TrainConfig
@@ -210,3 +214,53 @@ def test_unreachable_mlflow_stops_before_any_computation(monkeypatch: pytest.Mon
     state = train.training_flow(str(path), None, 1, None, return_state=True)
     assert state.is_failed()
     assert "serveur MLflow indisponible" in str(state.message)
+
+
+class FingerprintedSource(FrameSource):
+    """Comme PostgreSQL : une empreinte des matchs stockés, clé du cache du jeu d'entraînement."""
+
+    def __init__(self, source: FrameSource) -> None:
+        super().__init__(source.frame)
+        self.reads = 0
+
+    def fingerprint(self) -> str:
+        return f"{len(self.frame)}-{self.frame['match_date'].max()}"
+
+    def matches_frame(self) -> pd.DataFrame:
+        self.reads += 1
+        return super().matches_frame()
+
+
+class RecordingAnnouncer(DecisionAnnouncer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[tuple[RegistryEvent, dict[str, Any], str | None]] = []
+
+    def announce(
+        self, event: RegistryEvent, metrics: Mapping[str, Any] | None = None, flow_run_id: str | None = None
+    ) -> list[str]:
+        self.calls.append((event, dict(metrics or {}), flow_run_id))
+        return ["alerte : gardée dans l'historique (type absent de teams_events)"]
+
+
+def test_decisions_are_announced_and_the_dataset_is_cached(
+    world: TrainWorld, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source, announcer = FingerprintedSource(world.source), RecordingAnnouncer()
+    deps = TrainingDependencies(source, world.tracker, announcer)
+    monkeypatch.setattr(train, "dependency_factory", lambda *_: deps)
+    with temporary_settings({PREFECT_LOCAL_STORAGE_PATH: tmp_path / "prefect-results"}):
+        first, _ = campaign(world)
+        second, _ = campaign(world)  # mêmes matchs : le jeu de features vient du cache
+    assert first.is_completed() and second.is_completed()
+    assert source.reads == 1
+    first_run, second_run = world.runs("campaign")
+    assert (first_run.data.params["data.cached"], second_run.data.params["data.cached"]) == ("False", "True")
+
+    (first_event, metrics, run_id), (second_event, second_metrics, _) = announcer.calls
+    assert (first_event.version, second_event.version) == ("1", "2")  # même modèle, « au moins aussi bon »
+    assert run_id is not None and metrics["candidates"] == 3 and metrics["experiment_id"] == world.tracker.experiment_id
+    assert metrics["production_log_loss"] is None and metrics["elo_log_loss"] > metrics["log_loss"]
+    assert second_metrics["production_log_loss"] == pytest.approx(second_metrics["log_loss"])
+    assert set(metrics) == {"log_loss", "accuracy", "candidate", "candidates", "data_end", "experiment_id",
+                            "elo_log_loss", "production_log_loss"}  # fmt: skip

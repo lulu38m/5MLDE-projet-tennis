@@ -4,7 +4,8 @@
         data data-lock data-verify data-profile \
         up down logs ps urls mock clock advance chaos \
         ingest lots gx-docs db train train-seq train-weak mlflow \
-        registry promote rollback trace
+        registry promote rollback trace alert-preview alert-test \
+        demo demo-stop demo-status simulate alerts
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -15,12 +16,19 @@ DELAY ?=
 DATE ?=
 WORKERS ?=
 VERSION ?=
+EXAMPLE ?=
 REASON ?=
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
 # Pas de « conseils pour agents » de MLflow dans les logs.
 export MLFLOW_DISABLE_AGENT_HINT := 1
+# Nom du poste affiché dans les cartes Teams (le service d'alertes tourne dans Docker : il ne le connaît pas).
+TENNIS_ALERT_HOST ?= $(shell hostname)
+export TENNIS_ALERT_HOST
+# Révision du code gravée dans l'image : les campagnes lancées par le worker la tracent dans MLflow.
+GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
+export GIT_COMMIT
 GX_DOCS := state/gx/gx/uncommitted/data_docs/local_site/index.html
 
 help: ## Affiche cette aide
@@ -80,6 +88,7 @@ urls: ## Adresses des interfaces de la stack
 	@echo "mock_source (docs API) : http://127.0.0.1:8001/docs"
 	@echo "Prefect (UI)           : http://127.0.0.1:4201"
 	@echo "MLflow (UI)            : http://127.0.0.1:7282"
+	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
 	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
 	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
 
@@ -129,6 +138,31 @@ train-weak: ## Campagne volontairement mauvaise (configs/train-weak.yaml) : enre
 
 mlflow: ## Ouvre l'interface MLflow
 	$(UV) python -m webbrowser -t "http://127.0.0.1:7282"
+
+# --------------------------------------------------------------------------- alertes Teams
+
+alert-preview: ## Écrit le JSON des cartes Teams d'exemple dans state/alerts (rien n'est envoyé)
+	$(UV) python -m tennis_mlops.alerts preview
+
+alert-test: ## Envoie UNE carte « 🧪 TEST » au webhook de .env : `make alert-test EXAMPLE=echec`
+	$(UV) python -m tennis_mlops.alerts test $(if $(EXAMPLE),--example $(EXAMPLE))
+
+alerts: ## Dernières alertes et ce qu'elles sont devenues (envoyée, filtrée, sans webhook, échec)
+	$(UV) python -m tennis_mlops.alerts recent
+
+# --------------------------------------------------------------------------- orchestration (phase 6)
+
+demo: up ## Chaîne automatique : +7 jours simulés toutes les 2 min, ingestion, réentraînement sur événement, alertes
+	$(UV) python -m tennis_mlops.orchestration start
+
+demo-stop: ## Met la simulation planifiée en pause (le run en cours se termine)
+	$(UV) python -m tennis_mlops.orchestration stop
+
+demo-status: ## Déploiements, worker et derniers runs
+	$(UV) python -m tennis_mlops.orchestration status
+
+simulate: ## Un seul pas de simulation, sans planning : `make simulate DAYS=14`
+	$(UV) python -m tennis_mlops.flows.simulation --days $(DAYS)
 
 # --------------------------------------------------------------------------- registre (ne dépend que de MLflow)
 

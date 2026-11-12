@@ -114,7 +114,9 @@ Une promotion manuelle garde le `gate_status` d'origine (par exemple `failed`) e
 `promotion_reason` : on voit qu'une personne a passé outre la règle, et pourquoi.
 
 **Le rollback ne dépend que de MLflow** (ni Prefect, ni l'entraînement, ni la base du projet) : c'est la commande des
-incidents, elle doit marcher quand le reste est en panne.
+incidents, elle doit marcher quand le reste est en panne. Une fois appliqué, il est **annoncé** (phase 6) : une ligne
+dans `pipeline_events` et une carte Teams via le service d'alertes ([`ALERTES.md`](ALERTES.md)). Si la base ou le
+service ne répondent pas, la commande le dit en une ligne et réussit quand même.
 
 **Sans redéploiement** : `registry/loader.py` (`AliasModelLoader`) relit l'alias et ne recharge le modèle que si le
 numéro de version a changé ; si MLflow ne répond plus, le dernier modèle chargé reste servi. L'API de la phase 7
@@ -126,8 +128,9 @@ même processus.
 L'expérience MLflow **`atp-winner-decisions`** contient un run par décision : `promotion v9`, `rejet v10`,
 `promotion manuelle v11`, `rollback v11 → v9`. Tags `event`, `version`, `production_before`, `production_after`,
 `decided_by`, `reason`, `decided_at`, `campaign_run_id` ; artefacts `decision/event.json` et `decision/rules.csv`.
-Le registre donne l'**état** ; le journal donne l'**historique**, dans l'ordre. Les annotations Grafana (phase 9)
-reprendront ces événements.
+Le registre donne l'**état** ; le journal donne l'**historique**, dans l'ordre. Chaque décision est aussi inscrite
+dans la table `pipeline_events` de la base du projet ([`ORCHESTRATION.md`](ORCHESTRATION.md)), d'où les annotations
+Grafana la reprendront.
 
 ## La chaîne de traçabilité
 

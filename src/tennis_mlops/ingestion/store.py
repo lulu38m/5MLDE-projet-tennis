@@ -12,6 +12,7 @@ déjà stocké n'ajoute rien (idempotence par `match_id`), ce qui rend les repri
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Iterable, Mapping
@@ -154,6 +155,11 @@ class IngestionStore:
         """Ouvre la base (`postgresql+psycopg://…` ou `sqlite:///…`)."""
         return cls(sa.create_engine(url, pool_pre_ping=True))
 
+    @property
+    def engine(self) -> Engine:
+        """Le moteur SQLAlchemy (partagé avec le journal des événements, même base)."""
+        return self._engine
+
     def create_schema(self) -> None:
         """Crée les tables manquantes et élargit les colonnes devenues trop courtes (idempotent)."""
         metadata.create_all(self._engine)
@@ -231,6 +237,25 @@ class IngestionStore:
         """Nombre de matchs stockés."""
         with self._engine.connect() as conn:
             return int(conn.execute(sa.select(sa.func.count()).select_from(matches)).scalar_one())
+
+    def fingerprint(self) -> str:
+        """Empreinte des matchs stockés (nombre, dernier ajout, dernier match) : clé du cache du jeu d'entraînement.
+
+        Les lots ne font qu'ajouter des matchs : tant que l'empreinte ne change pas, le jeu de features est le même.
+        """
+        query = sa.select(sa.func.count(), sa.func.max(matches.c.ingested_at), sa.func.max(matches.c.match_date))
+        with self._engine.connect() as conn:
+            count, last_ingested, last_match = conn.execute(query).one()
+        raw = f"{count}|{last_ingested}|{last_match}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def count_matches_ingested_after(self, since: datetime | None) -> int:
+        """Matchs stockés après un instant (tous si `since` est None) : de quoi décider un réentraînement."""
+        query = sa.select(sa.func.count()).select_from(matches)
+        if since is not None:
+            query = query.where(matches.c.ingested_at > since)
+        with self._engine.connect() as conn:
+            return int(conn.execute(query).scalar_one())
 
     def matches_frame(self) -> pd.DataFrame:
         """Tous les matchs validés, pour l'entraînement (quelques Mo : 47 000 matchs au plus)."""

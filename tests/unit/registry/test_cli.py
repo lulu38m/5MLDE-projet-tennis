@@ -1,17 +1,42 @@
 """`python -m tennis_mlops.registry` : état, promotion manuelle, rollback, traçabilité, refus."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from tennis_mlops.orchestration.decisions import DecisionAnnouncer
+from tennis_mlops.registry import __main__ as cli
 from tennis_mlops.registry.__main__ import EXIT_OK, EXIT_REFUSED, main
+from tennis_mlops.registry.events import RegistryEvent
 from tennis_mlops.registry.promotion import Promoter
 from tests.support.registry import MODEL, RegistryWorld, registry_world, verdict
 
 
+class RecordingAnnouncer(DecisionAnnouncer):
+    """Garde les annonces au lieu d'écrire en base et d'appeler le service d'alertes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.announced: list[tuple[RegistryEvent, dict[str, Any]]] = []
+
+    def announce(
+        self, event: RegistryEvent, metrics: Mapping[str, Any] | None = None, flow_run_id: str | None = None
+    ) -> list[str]:
+        self.announced.append((event, dict(metrics or {})))
+        return ["alerte : carte envoyée sur Teams"]
+
+
 @pytest.fixture
-def world(tmp_path: Path) -> Iterator[RegistryWorld]:
+def announcer(monkeypatch: pytest.MonkeyPatch) -> RecordingAnnouncer:
+    recorder = RecordingAnnouncer()
+    monkeypatch.setattr(cli, "announcer_factory", lambda: recorder)
+    return recorder
+
+
+@pytest.fixture
+def world(tmp_path: Path, announcer: RecordingAnnouncer) -> Iterator[RegistryWorld]:
     with registry_world(tmp_path) as w:
         yield w
 
@@ -51,6 +76,23 @@ def test_status_promote_rollback_trace(world: RegistryWorld, capsys: pytest.Capt
 
     code, out, _ = run(world, capsys, "trace", "--version", v2)
     assert "lifecycle : rolled_back" in out and "rollback_reason : plaintes" in out
+
+
+def test_promotions_and_rollbacks_are_announced(
+    world: RegistryWorld, announcer: RecordingAnnouncer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    v1, v2, v3 = world.add_version(0.6), world.add_version(0.5), world.add_version(0.4)
+    Promoter(world.registry).apply(v1, verdict(True))
+    Promoter(world.registry).apply(v2, verdict(True, compared_to=v1, delta=-0.01))
+    code, out, _ = run(world, capsys, "promote", "--version", v3, "--reason", "test manuel")
+    assert code == EXIT_OK and "alerte : carte envoyée sur Teams" in out
+    run(world, capsys, "rollback", "--reason", "plaintes")
+    (promoted, none), (rolled_back, metrics) = announcer.announced
+    assert promoted.kind.value == "promotion manuelle" and none == {}
+    assert (rolled_back.production_before, rolled_back.production_after) == (v3, v2)
+    assert metrics == {"previous_after": v1}  # un 2e rollback ramènerait v1
+    run(world, capsys, "status")
+    assert len(announcer.announced) == 2  # une lecture n'annonce rien
 
 
 def test_refusals_exit_with_code_1(world: RegistryWorld, capsys: pytest.CaptureFixture[str]) -> None:

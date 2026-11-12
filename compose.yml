@@ -4,12 +4,28 @@
 name: tennis-mlops
 
 x-app: &app
-  build: .
+  build:
+    context: .
+    args:
+      GIT_COMMIT: "${GIT_COMMIT:-}"  # passé par le Makefile (git rev-parse HEAD)
   image: tennis-mlops:local
   restart: unless-stopped
   env_file:
     - path: .env
       required: false
+
+# Adresses vues depuis les conteneurs (phase 6). Elles remplacent celles de .env, écrites pour la machine hôte
+# (127.0.0.1:5433…). Les liens des cartes Teams, eux, sont ouverts par le navigateur : adresses publiées sur l'hôte.
+x-internal: &internal
+  TENNIS_POSTGRES_DSN: "postgresql://tennis:${TENNIS_DB_PASSWORD:-tennis-local}@postgres:5432/tennis"
+  TENNIS_MLFLOW_TRACKING_URI: http://mlflow:7282
+  TENNIS_PREFECT_API_URL: http://prefect:4200/api
+  PREFECT_API_URL: http://prefect:4200/api
+  TENNIS_MOCK_SOURCE_URL: http://mock_source:8001
+  TENNIS_ALERT_SINK_URL: http://alert_sink:8090
+  TENNIS_PREFECT_UI_URL: "http://127.0.0.1:${PREFECT_PORT:-4201}"
+  TENNIS_MLFLOW_UI_URL: "http://127.0.0.1:${MLFLOW_PORT:-7282}"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
 
 # Comptes et bases de PostgreSQL, un par usage. Script idempotent rejoué à chaque `make up` par le service
 # `postgres-setup` : une base ajoutée dans une phase ultérieure est créée même sur un volume existant (le dossier
@@ -142,6 +158,77 @@ services:
       resources:
         limits:
           memory: 1g
+
+  # --------------------------------------------------------------------------- phase 6 : orchestration et alertes
+
+  orchestration-setup:
+    # Tâche ponctuelle, rejouée à chaque `make up` : work pool, déploiements et automations dans Prefect (idempotent,
+    # la simulation garde son état de pause). Voir src/tennis_mlops/orchestration/setup.py.
+    <<: *app
+    restart: "no"
+    command: ["python", "-m", "tennis_mlops.orchestration", "setup"]
+    environment:
+      <<: *internal
+    depends_on:
+      prefect:
+        condition: service_healthy
+
+  alert_sink:
+    # Reçoit les automations Prefect (échec, dégradé) et les décisions du registre, construit la carte, l'envoie sur
+    # Teams si TENNIS_TEAMS_WEBHOOK_URL est défini dans .env, et garde l'historique (make alerts).
+    <<: *app
+    command: ["python", "-m", "tennis_mlops.alerts", "serve", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      <<: *internal
+      TENNIS_ALERT_HOST: "${TENNIS_ALERT_HOST:-}"  # nom du Mac, passé par le Makefile (sinon : id du conteneur)
+    ports:
+      - "127.0.0.1:${ALERT_SINK_PORT:-8090}:8090"
+    depends_on:
+      postgres-setup:
+        condition: service_completed_successfully
+      prefect:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  worker:
+    # Exécute les runs des déploiements (simulation, ingestion, entraînement) dans ce conteneur : chaque run est un
+    # sous-processus, avec les adresses internes ci-dessus. L'état (quarantaine, Great Expectations) est partagé
+    # avec la machine hôte : `make lots`, `make gx-docs` voient ce que le worker a produit.
+    <<: *app
+    command: ["prefect", "worker", "start", "--pool", "tennis-pool", "--type", "process", "--name", "tennis-worker",
+              "--limit", "3", "--with-healthcheck"]
+    environment:
+      <<: *internal
+    volumes:
+      - ./state:/app/state
+    depends_on:
+      orchestration-setup:
+        condition: service_completed_successfully
+      alert_sink:
+        condition: service_healthy
+      mock_source:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
 
 volumes:
   postgres_data:

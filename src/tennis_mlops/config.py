@@ -14,10 +14,11 @@ d'être ignorée silencieusement. `Settings` ignore en revanche les variables qu
 
 from __future__ import annotations
 
+import platform
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, model_validator
@@ -41,6 +42,17 @@ class Settings(BaseSettings):
     # Identifiants de démonstration d'une base locale liée à 127.0.0.1 ; surchargés par .env.
     postgres_dsn: SecretStr = SecretStr("postgresql://tennis:tennis-local@127.0.0.1:5433/tennis")
     teams_webhook_url: SecretStr | None = None
+    # Phase 6 : service d'alertes, et adresses des interfaces telles que les voit le navigateur (les liens des cartes
+    # Teams), qui diffèrent des adresses internes quand un service tourne dans Docker.
+    alert_sink_url: HttpUrl = HttpUrl("http://127.0.0.1:8090")
+    prefect_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:4201")
+    mlflow_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:7282")
+    alert_host: str = Field(default="", description="Poste affiché dans les cartes (défaut : nom de la machine)")
+    alert_owner: str = Field(default="", description="Prénom affiché dans les cartes, dans un canal partagé")
+
+    def alert_origin(self) -> str:
+        """Le poste qui envoie : `TENNIS_ALERT_HOST` (le Makefile y met le nom du Mac), sinon le nom de la machine."""
+        return self.alert_host.strip() or platform.node()
 
     def sqlalchemy_url(self) -> str:
         """URL SQLAlchemy (pilote psycopg 3) à partir du DSN PostgreSQL ; les autres schémas passent tels quels."""
@@ -169,6 +181,23 @@ class IngestionConfig(_StrictModel):
         return resolve_path(self.state_dir, root)
 
 
+AlertKindName = Literal["echec", "quarantaine", "degrade", "rollback", "promotion"]
+
+
+class OrchestrationConfig(_StrictModel):
+    """Chaîne automatique : simulation planifiée, entraînement déclenché par événement, alertes Teams."""
+
+    simulation_days_per_run: int = Field(default=7, ge=1, le=90, description="Jours simulés par exécution")
+    simulation_interval_s: int = Field(default=120, ge=30, description="Une exécution toutes les N secondes réelles")
+    training_trigger_matches: int = Field(
+        default=200, ge=0, description="Nouveaux matchs avant réentraînement (0 = jamais)"
+    )
+    teams_events: tuple[AlertKindName, ...] = ("echec", "quarantaine", "degrade", "rollback")
+    alert_cooldown_min: int = Field(
+        default=30, ge=0, description="Même incident : pas de nouvelle carte avant N minutes (0 = toujours envoyer)"
+    )
+
+
 class DemoConfig(_StrictModel):
     """Réglages qui rendent la démo lisible, sans effet sur les résultats."""
 
@@ -183,6 +212,7 @@ class ProjectConfig(_StrictModel):
     mock_source: MockSourceConfig = MockSourceConfig()
     ingestion: IngestionConfig = IngestionConfig()
     demo: DemoConfig = DemoConfig()
+    orchestration: OrchestrationConfig = OrchestrationConfig()
 
     @model_validator(mode="after")
     def _check_simulation_within_data(self) -> Self:

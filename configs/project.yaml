@@ -42,3 +42,12 @@ ingestion:
 
 demo:
   sleep_s: 0.0                  # > 0 pour ralentir les tasks et les rendre visibles dans l'UI Prefect
+
+orchestration:
+  simulation_days_per_run: 7     # `make demo` : chaque exécution avance l'horloge d'une semaine simulée…
+  simulation_interval_s: 120     # …toutes les 2 minutes réelles
+  training_trigger_matches: 200  # réentraînement demandé (événement Prefect) dès 200 nouveaux matchs validés
+  # Événements envoyés sur Teams (si TENNIS_TEAMS_WEBHOOK_URL est défini) : echec, quarantaine, degrade,
+  # rollback, promotion. Une version refusée par la règle de mise en service n'est jamais envoyée (décision normale).
+  teams_events: [echec, quarantaine, degrade, rollback]
+  alert_cooldown_min: 30         # un incident qui persiste (même lot, même panne) : une carte par demi-heure au plus

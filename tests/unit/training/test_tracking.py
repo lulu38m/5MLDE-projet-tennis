@@ -88,3 +88,10 @@ def test_code_info(tmp_path: Path) -> None:
     assert info["git.commit"].startswith("inconnu")
     assert len(info["uv_lock.sha256"]) == 64
     assert code_info(tmp_path / "absent")["uv_lock.sha256"] == "absent"
+
+
+def test_code_info_in_the_docker_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TENNIS_GIT_COMMIT", "d266f3d0c0ffee")  # pas de .git dans l'image : révision du build
+    info = code_info(tmp_path)
+    assert (info["git.commit"], info["mlflow.source.git.commit"]) == ("d266f3d0c0ffee", "d266f3d0c0ffee")
+    assert info["git.dirty"] == "inconnu (image Docker)"

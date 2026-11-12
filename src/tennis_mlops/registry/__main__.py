@@ -5,7 +5,9 @@
 - `rollback` : `production` ← `previous` (`make rollback REASON="…"`)
 - `trace`    : la chaîne version → run MLflow → campagne → run Prefect → lots → source (`make trace VERSION=3`)
 
-Ne dépend que du serveur MLflow. Code de sortie 1 si l'opération est refusée ou si MLflow ne répond pas.
+Ne dépend que du serveur MLflow. Une promotion ou un rollback est ensuite annoncé (best effort) : une ligne dans
+`pipeline_events` et le service d'alertes prévenu (carte Teams). Code de sortie 1 si l'opération est refusée ou si
+MLflow ne répond pas ; jamais à cause de l'annonce.
 """
 
 from __future__ import annotations
@@ -14,16 +16,19 @@ import argparse
 import os
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from mlflow.entities.model_registry import ModelVersion
 
+from tennis_mlops.alerts.client import AlertSinkClient
 from tennis_mlops.config import PROJECT_ROOT, Settings
 from tennis_mlops.data.lockfile import DataLock
-from tennis_mlops.registry.events import RegistryEvent
+from tennis_mlops.orchestration.decisions import DecisionAnnouncer
+from tennis_mlops.orchestration.events import PipelineEvents
+from tennis_mlops.registry.events import EventKind, RegistryEvent
 from tennis_mlops.registry.journal import DecisionJournal, journal_experiment
 from tennis_mlops.registry.model_registry import ModelRegistry, UnknownVersionError
 from tennis_mlops.registry.promotion import Promoter, PromotionError
@@ -34,6 +39,16 @@ from tennis_mlops.training.tracking import MlflowTracker, TrackingError
 
 EXIT_OK, EXIT_REFUSED = 0, 1
 DATA_LOCK_PATH = PROJECT_ROOT / "configs" / "data.lock.json"
+
+
+def default_announcer() -> DecisionAnnouncer:
+    """Base du projet et service d'alertes de la stack (adresses de `.env`)."""
+    settings = Settings()
+    return DecisionAnnouncer(PipelineEvents.from_url(settings.sqlalchemy_url()),
+                             AlertSinkClient(str(settings.alert_sink_url)))  # fmt: skip
+
+
+announcer_factory: Callable[[], DecisionAnnouncer] = default_announcer  # remplacé dans les tests
 
 
 @dataclass(frozen=True)
@@ -190,16 +205,24 @@ def _run(connection: Connection, args: argparse.Namespace) -> list[str]:
         return status_lines(registry)
     if args.command == "promote":
         event = Promoter(registry).promote_manually(str(args.version), args.reason)
-        return [event.summary(), *_journal(connection, event)]
+        return [event.summary(), *_journal(connection, event), *_announce(registry, event)]
     if args.command == "rollback":
         event = Rollback(registry).run(args.reason)
         lines = [event.summary(), "L'API suit l'alias `production` : elle sert cette version sans redéploiement."]
-        return lines + _journal(connection, event)
+        return lines + _journal(connection, event) + _announce(registry, event)
     version = registry.get(str(args.version)) if args.version else registry.by_alias(Alias.PRODUCTION)
     if version is None:
         msg = f"aucune version de {registry.name} en production : préciser VERSION=…"
         raise UnknownVersionError(msg)
     return trace_lines(connection, version)
+
+
+def _announce(registry: ModelRegistry, event: RegistryEvent) -> list[str]:
+    metrics: dict[str, str | None] = {}
+    if event.kind is EventKind.ROLLBACK:  # la carte dit si un 2e rollback reste possible
+        following = registry.by_alias(Alias.PREVIOUS)
+        metrics["previous_after"] = str(following.version) if following else None
+    return announcer_factory().announce(event, metrics)
 
 
 def _journal(connection: Connection, event: RegistryEvent) -> list[str]:

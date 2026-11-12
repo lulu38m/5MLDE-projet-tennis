@@ -27,6 +27,11 @@ RUN chmod -R a+rX /app/src /app/configs
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
+# Révision Git du code de l'image (pas de .git dedans) : tracée dans MLflow par les campagnes lancées par le worker.
+# Déclarée tard : changer de commit ne reconstruit que cette couche.
+ARG GIT_COMMIT=""
+ENV TENNIS_GIT_COMMIT=${GIT_COMMIT}
+
 # Les données ne sont jamais dans l'image (licence) : montées en lecture seule dans /app/data/raw.
 # /var/lib/mlflow appartient à l'utilisateur non-root : un volume nommé monté là hérite de ces droits.
 RUN useradd --create-home --uid 10001 app && mkdir -p /app/data/raw /var/lib/mlflow \

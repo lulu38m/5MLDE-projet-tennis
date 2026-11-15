@@ -1,4 +1,4 @@
-# Stack locale du projet. Les services s'ajoutent phase par phase (api, interface, grafana…).
+# Stack locale du projet. Les services s'ajoutent phase par phase (prometheus, grafana…).
 # Ports publiés sur 127.0.0.1 uniquement : rien n'est exposé sur le réseau.
 # Ports d'hôte décalés (Postgres 5433, Prefect 4201, MLflow 7282) pour coexister avec la stack des TP.
 name: tennis-mlops
@@ -235,6 +235,34 @@ services:
       resources:
         limits:
           memory: 1g
+
+  ui:
+    # Interface web de test (phase 8) : ne parle qu'à l'API (X-Client: ui). Ni .env ni identifiants : elle n'a
+    # besoin que de l'adresse de l'API et des liens vers les autres interfaces, ouverts par le navigateur.
+    <<: *app
+    env_file: []
+    command: ["python", "-m", "tennis_mlops.ui", "--host", "0.0.0.0", "--port", "8501"]
+    environment:
+      TENNIS_API_URL: http://api:8000
+      TENNIS_API_UI_URL: "http://127.0.0.1:${API_PORT:-8000}"
+      TENNIS_MLFLOW_UI_URL: "http://127.0.0.1:${MLFLOW_PORT:-7282}"
+      TENNIS_PREFECT_UI_URL: "http://127.0.0.1:${PREFECT_PORT:-4201}"
+      TENNIS_GRAFANA_UI_URL: "http://127.0.0.1:${GRAFANA_PORT:-3000}"
+    ports:
+      - "127.0.0.1:${UI_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   worker:
     # Exécute les runs des déploiements (simulation, ingestion, entraînement) dans ce conteneur : chaque run est un

@@ -7,11 +7,23 @@ et les tests de charge. Les erreurs de l'API sont rendues lisibles (`ApiError` :
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 from typing import Any, Self
 
 import httpx
 
-from tennis_mlops.serving.schemas import BatchRequest, BatchResponse, FeedbackRequest, FeedbackResponse, MatchRequest
+from tennis_mlops.serving.schemas import (
+    BatchRequest,
+    BatchResponse,
+    FeedbackRequest,
+    FeedbackResponse,
+    FixturesResponse,
+    H2HResponse,
+    MatchRequest,
+    PlayersResponse,
+    PlayerStats,
+    PredictResponse,
+)
 
 
 class ApiError(RuntimeError):
@@ -25,9 +37,10 @@ class ApiError(RuntimeError):
 
 
 class ApiClient:
-    """`POST /predict/batch`, `POST /feedback`, `GET /model`, `GET /ready`."""
+    """Prédiction, feedback, état du service, et consultation des joueurs (interface de test)."""
 
     def __init__(self, base_url: str, client_name: str, timeout_s: float = 30.0, http: object = None) -> None:
+        self.base_url = base_url.rstrip("/")
         self._owned = None if http is not None else httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout_s)
         self._http: Any = http if http is not None else self._owned  # httpx.Client, ou le TestClient des tests
         self.headers = {"X-Client": client_name}
@@ -42,6 +55,11 @@ class ApiClient:
         """Ferme la connexion si ce client l'a ouverte."""
         if self._owned is not None:
             self._owned.close()
+
+    def predict(self, match: MatchRequest) -> PredictResponse:
+        """Prédit un match."""
+        body = match.model_dump(mode="json", exclude_none=True)
+        return PredictResponse.model_validate(self._call("POST", "/predict", json=body))
 
     def predict_batch(self, matches: Sequence[MatchRequest]) -> BatchResponse:
         """Prédit plusieurs matchs en un appel."""
@@ -60,6 +78,25 @@ class ApiClient:
     def ready(self) -> dict[str, Any]:
         """`/ready`, sans lever si le service n'est pas prêt (503)."""
         return dict(self._call("GET", "/ready", accept=(200, 503)))
+
+    def players(self, search: str | None = None, limit: int = 20) -> PlayersResponse:
+        """Recherche de joueurs (sans texte : les joueurs classés actifs)."""
+        params: dict[str, Any] = {"limit": limit} | ({"search": search} if search else {})
+        return PlayersResponse.model_validate(self._call("GET", "/players", params=params))
+
+    def player_stats(self, player_id: int, as_of: date | None = None) -> PlayerStats:
+        """Statistiques d'un joueur jusqu'à `as_of` (défaut : dernière journée de l'historique)."""
+        params = {"as_of": as_of.isoformat()} if as_of else {}
+        return PlayerStats.model_validate(self._call("GET", f"/players/{player_id}/stats", params=params))
+
+    def h2h(self, p1: int, p2: int) -> H2HResponse:
+        """Face-à-face de deux joueurs."""
+        return H2HResponse.model_validate(self._call("GET", "/h2h", params={"p1": p1, "p2": p2}))
+
+    def fixture_predictions(self, days: int = 14, client: str = "scoring") -> FixturesResponse:
+        """Matchs prédits à l'avance et leur résultat."""
+        params = {"days": days, "client": client}
+        return FixturesResponse.model_validate(self._call("GET", "/fixtures/predictions", params=params))
 
     def _call(self, method: str, path: str, accept: tuple[int, ...] = (200,), **kwargs: Any) -> Any:  # noqa: ANN401
         try:

@@ -16,11 +16,12 @@ qualité, le réentraînement, la mise en service et la supervision.
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, worker, alertes (`make urls`)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, API, interface, worker… (`make urls`)
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
 make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraînement sur événement, alertes Teams
 make predict    # une prédiction de l'API (Djokovic contre Nadal sur terre battue)
+make ui-open    # l'interface de test : deux joueurs, une surface → leur probabilité, sans terminal
 ```
 
 ## Commandes
@@ -65,6 +66,8 @@ make predict    # une prédiction de l'API (Djokovic contre Nadal sur terre batt
 | `make api-status` | API prête ou dégradée, version servie, historique, qualité en ligne |
 | `make predictions` | Dernières prédictions : version, durée de la requête, vrai résultat |
 | `make score` / `make feedback` | Prédire les matchs de la semaine / remonter les vrais résultats (faits aussi par `make demo`) |
+| `make ui-open` / `make ui` | Ouvre l'interface de test (http://127.0.0.1:8501) / la lance hors Docker |
+| `make ui-smoke` | Test de fumée sur la stack : la page Match prédit et la prédiction est tracée avec le client `ui` |
 
 ## Organisation du code
 
@@ -80,10 +83,11 @@ make predict    # une prédiction de l'API (Djokovic contre Nadal sur terre batt
 | `src/tennis_mlops/orchestration/` | Déploiements, automations, déclenchement par événement, journal `pipeline_events` |
 | `src/tennis_mlops/alerts/` | Cartes Teams (Adaptive Cards) et service d'alertes `alert_sink` |
 | `src/tennis_mlops/serving/`, `src/tennis_mlops/api/` | Service de prédiction (historique rejoué, modèle servi, traces) et son API FastAPI |
+| `src/tennis_mlops/ui/` | Interface web de test (Streamlit) : ne parle qu'à l'API |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md` |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md` |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -195,6 +199,21 @@ peut être prédit avec son propre résultat.
   matchs de la semaine à venir (`POST /predict/batch`).
 
 Détails : [`docs/API.md`](docs/API.md).
+
+## Interface web de test
+
+Le service `ui` (`http://127.0.0.1:8501`, `make ui-open`) permet d'essayer le modèle sans terminal. Il ne parle qu'à
+l'API, en se présentant avec `X-Client: ui` : ses prédictions sont tracées comme les autres.
+
+- **Match** : deux joueurs (recherche par nom ou identifiant), une surface, un tournoi → la probabilité de chacun, la
+  version, la latence, le `request_id`, et côte à côte ce que voit le modèle (classement, Elo surface, forme,
+  face-à-face).
+- **Joueur** et **Face-à-face** : classement dans le temps, bilans par surface et par niveau, forme, rencontres.
+- **Matchs à venir** : ce que le scoring a prédit à l'avance, puis le vrai résultat et si le modèle avait raison.
+- **Modèle** : version en production, qualité en ligne, horloge simulée, liens vers MLflow, Prefect et Grafana.
+
+Tout vient de l'historique **validé** : rien après l'horloge simulée. Les erreurs sont dites simplement (API
+arrêtée, aucun modèle, joueur inconnu, débutant). Détails : [`docs/UI.md`](docs/UI.md).
 
 ## Orchestration et alertes
 

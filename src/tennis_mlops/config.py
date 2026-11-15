@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Phase 7 : l'API écrit avec son propre compte (app_writer), qui ne peut que lire les tables d'ingestion.
     api_postgres_dsn: SecretStr = SecretStr("postgresql://app_writer:app-writer-local@127.0.0.1:5433/tennis")
     admin_token: SecretStr | None = Field(default=None, description="Si défini, exigé par POST /admin/reload")
+    # Phase 8 : liens de l'interface de test, ouverts par le navigateur (adresses publiées sur l'hôte).
+    api_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:8000")
+    grafana_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:3000")
 
     def alert_origin(self) -> str:
         """Le poste qui envoie : `TENNIS_ALERT_HOST` (le Makefile y met le nom du Mac), sinon le nom de la machine."""

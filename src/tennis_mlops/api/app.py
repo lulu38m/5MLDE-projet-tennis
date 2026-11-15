@@ -10,6 +10,8 @@
 | `GET /ready` | peut-on prédire : `ready`, `degraded` (MLflow ou base injoignable, cache servi) ou `503` |
 | `POST /admin/reload` | relire tout de suite l'alias et l'historique |
 | `GET /metrics` | métriques Prometheus |
+| `GET /players`, `/players/{id}/stats`, `/h2h` | joueurs, statistiques, face-à-face (historique validé seulement) |
+| `GET /fixtures/predictions` | matchs prédits à l'avance par le scoring, et leur résultat une fois validé |
 
 Chaque réponse porte `X-Request-ID` (repris de la requête s'il est fourni) ; les prédictions portent aussi
 `X-Model-Version`. Le client se présente avec `X-Client` (`ui`, `scoring`, `feedback`, `locust`…) : il est gardé
@@ -25,10 +27,10 @@ import traceback
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, date, datetime
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import FastAPI, Header, Path, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -41,7 +43,11 @@ from tennis_mlops.serving.schemas import (
     BatchResponse,
     FeedbackRequest,
     FeedbackResponse,
+    FixturesResponse,
+    H2HResponse,
     MatchRequest,
+    PlayersResponse,
+    PlayerStats,
     PredictResponse,
 )
 from tennis_mlops.serving.service import (
@@ -49,6 +55,7 @@ from tennis_mlops.serving.service import (
     PredictionService,
     ServiceUnavailableError,
     UnknownMatchError,
+    UnknownPlayerError,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,6 +144,10 @@ def create_app(service: PredictionService, admin_token: str | None = None, manag
     async def unknown_match(request: Request, exc: UnknownMatchError) -> JSONResponse:
         return fail(request, 422, "inconsistent_feedback", str(exc))
 
+    @app.exception_handler(UnknownPlayerError)
+    async def unknown_player(request: Request, exc: UnknownPlayerError) -> JSONResponse:
+        return fail(request, 404, "unknown_player", str(exc))
+
     @app.exception_handler(ServiceUnavailableError)
     async def unavailable(request: Request, exc: ServiceUnavailableError) -> JSONResponse:
         return fail(request, 503, "unavailable", str(exc))
@@ -217,6 +228,39 @@ def create_app(service: PredictionService, admin_token: str | None = None, manag
                 status_code=403, detail="jeton d'administration absent ou faux (X-Admin-Token)"
             )
         return service.reload()
+
+    # ------------------------------------------------------------------ consultation (interface de test)
+
+    @app.get("/players", tags=["consultation"])
+    def players(
+        search: Annotated[str | None, Query(max_length=64, description="Nom (sans accents) ou identifiant")] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 20,
+    ) -> PlayersResponse:
+        """Recherche de joueurs ; sans texte, les joueurs classés ayant joué dans l'année, par classement."""
+        return service.search_players(search, limit)
+
+    @app.get("/players/{player_id}/stats", tags=["consultation"])
+    def player_stats(
+        player_id: Annotated[int, Path(gt=0)],
+        as_of: Annotated[date | None, Query(description="Défaut et maximum : dernière journée de l'historique")] = None,
+    ) -> PlayerStats:
+        """Classement dans le temps, bilans par surface et niveau, forme, derniers résultats."""
+        return service.player_stats(player_id, as_of)
+
+    @app.get("/h2h", tags=["consultation"])
+    def h2h(
+        p1: Annotated[int, Query(gt=0)], p2: Annotated[int, Query(gt=0)], as_of: Annotated[date | None, Query()] = None
+    ) -> H2HResponse:
+        """Rencontres des deux joueurs dans l'historique validé, bilan par surface."""
+        return service.head_to_head(p1, p2, as_of)
+
+    @app.get("/fixtures/predictions", tags=["consultation"])
+    def fixture_predictions(
+        days: Annotated[int, Query(ge=1, le=120, description="Matchs datés depuis N jours avant l'horloge")] = 14,
+        client: Annotated[str, Query(max_length=32, description="Auteur des prédictions ; vide = tous")] = "scoring",
+    ) -> FixturesResponse:
+        """Matchs prédits à l'avance, et pour ceux qui sont joués : le vrai résultat et si le modèle avait raison."""
+        return service.fixture_predictions(days, client)
 
     @app.get("/metrics", tags=["état"], include_in_schema=False)
     def prometheus() -> Response:

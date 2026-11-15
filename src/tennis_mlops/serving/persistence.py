@@ -28,7 +28,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -70,6 +70,7 @@ predictions = sa.Table(
     sa.Column("tourney_level", sa.String(4)),
     sa.Column("round", sa.String(8)),
     sa.Column("best_of", sa.Integer()),
+    sa.Column("tourney_name", sa.String(120)),  # phase 8 : ajoutée à une table existante par `create_schema`
     sa.Column("p1_id", sa.Integer(), nullable=False),
     sa.Column("p2_id", sa.Integer(), nullable=False),
     sa.Column("p1_name", sa.String(120)),
@@ -112,6 +113,10 @@ feedbacks = sa.Table(
 )
 
 TABLES = {"api_requests": api_requests, "predictions": predictions, "errors": errors}
+ADDED_COLUMNS = (predictions.c.tourney_name,)
+FIXTURE_COLUMNS = ("match_id", "match_date", "tourney_name", "tourney_level", "surface", "round", "p1_id", "p2_id",
+                   "p1_name", "p2_name", "p1_win_probability", "predicted_winner_id", "model_version", "created_at",
+                   "client")  # fmt: skip
 
 PREDICTION_OUTCOMES = """
 CREATE VIEW prediction_outcomes AS
@@ -184,10 +189,16 @@ class ApiStore:
         return self._engine
 
     def create_schema(self) -> None:
-        """Tables et vues (idempotent)."""
+        """Tables et vues (idempotent), et colonnes ajoutées depuis la création d'une table existante."""
         metadata.create_all(self._engine)
         postgres = self._engine.dialect.name == "postgresql"
         with self._engine.begin() as conn:
+            present = {c["name"] for c in sa.inspect(conn).get_columns("predictions")}
+            for column in ADDED_COLUMNS:
+                if column.name not in present:  # base de la phase 7 : la colonne est ajoutée, rien n'est perdu
+                    kind = column.type.compile(dialect=conn.dialect)
+                    exists = " IF NOT EXISTS" if postgres else ""
+                    conn.execute(sa.text(f"ALTER TABLE predictions ADD COLUMN{exists} {column.name} {kind}"))
             if postgres:  # CREATE OR REPLACE : plusieurs processus de l'API peuvent démarrer en même temps
                 conn.execute(sa.text(PREDICTION_OUTCOMES.replace("CREATE VIEW", "CREATE OR REPLACE VIEW", 1)))
                 conn.execute(sa.text(ONLINE_METRICS.replace("CREATE VIEW", "CREATE OR REPLACE VIEW", 1)))
@@ -246,6 +257,28 @@ class ApiStore:
         )
         with self._engine.connect() as conn:
             return [(str(r[0]), int(r[1])) for r in conn.execute(query)]
+
+    def fixture_predictions(self, since: date, client: str | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+        """Dernière prédiction de chaque match daté de `since` ou après, avec son résultat s'il est validé en base."""
+        p, m = predictions, matches
+        columns = [p.c[name] for name in FIXTURE_COLUMNS] + [
+            m.c.status.label("result_status"), m.c.winner_id.label("actual_winner_id"), m.c.score,
+            m.c.tourney_name.label("result_tourney_name"),
+        ]  # fmt: skip
+        query = (
+            sa.select(*columns)
+            .select_from(p.outerjoin(m, m.c.match_id == p.c.match_id))
+            .where(p.c.match_id.is_not(None), p.c.match_date >= since)
+            .order_by(p.c.created_at.desc())
+            .limit(limit)
+        )
+        if client:
+            query = query.where(p.c.client == client)
+        latest: dict[str, dict[str, Any]] = {}
+        with self._engine.connect() as conn:
+            for row in conn.execute(query).mappings():
+                latest.setdefault(str(row["match_id"]), dict(row))  # la plus récente d'abord
+        return sorted(latest.values(), key=lambda r: (r["match_date"], str(r["match_id"])))
 
     def online_metrics(self, model_version: str | None = None) -> list[OnlineMetrics]:
         """Accuracy, log loss et Brier en ligne par version (calculés ici : SQLite n'a pas `LN`)."""

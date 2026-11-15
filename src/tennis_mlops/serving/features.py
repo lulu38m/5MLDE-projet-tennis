@@ -23,6 +23,8 @@ import pandas as pd
 
 from tennis_mlops.features import FeatureBuilder, FeatureConfig
 from tennis_mlops.features.builder import PLAYED_STATUSES, PlayerSnapshot
+from tennis_mlops.serving.history import PlayerHistory
+from tennis_mlops.serving.schemas import PlayerSummary
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,14 @@ class PlayerProfile:
         age = None if self.age is None else self.age + (on - self.last_match).days / YEAR_DAYS
         return PlayerSnapshot(self.player_id, self.name, self.rank, self.rank_points, age, self.height_cm, self.hand)
 
+    def summary(self) -> PlayerSummary:
+        """Pour la recherche de joueurs (`GET /players`)."""
+        return PlayerSummary(
+            id=self.player_id, name=self.name, ioc=self.ioc, hand=self.hand, height_cm=self.height_cm,
+            rank=self.rank, rank_points=self.rank_points, age=None if self.age is None else round(self.age, 1),
+            last_match=self.last_match, matches=self.matches,
+        )  # fmt: skip
+
 
 @dataclass(frozen=True)
 class FeatureSnapshot:
@@ -77,6 +87,8 @@ class FeatureSnapshot:
     built_at: datetime
     build_seconds: float
     watermark: date | None = None
+    history: PlayerHistory = field(default_factory=lambda: PlayerHistory(pd.DataFrame()))
+    summaries: Mapping[int, PlayerSummary] = field(default_factory=dict)
 
     @property
     def last_day(self) -> date | None:
@@ -155,14 +167,18 @@ class FeatureStore:
         if not matches.empty:
             builder.build(matches)
         watermark = summary.get("watermark")
+        profiles = player_profiles(matches)
+        summaries = {pid: p.summary() for pid, p in profiles.items()}
         return FeatureSnapshot(
             builder=builder,
-            profiles=player_profiles(matches),
+            profiles=profiles,
             fingerprint=fingerprint,
             matches=len(matches),
             built_at=datetime.now(UTC),
             build_seconds=time.perf_counter() - started,
             watermark=date.fromisoformat(str(watermark)[:10]) if watermark else None,
+            history=PlayerHistory(matches, summaries),
+            summaries=summaries,
         )
 
 

@@ -45,6 +45,7 @@ class MatchRequest(_Strict):
     tourney_level: Level | None = Field(default=None, description="G Grand Chelem, M Masters, A ATP 250/500…")
     round: Round | None = None
     best_of: Literal[3, 5] | None = None
+    tourney_name: str | None = Field(default=None, max_length=120, description="Affiché par l'interface")
     player1: PlayerInput
     player2: PlayerInput
 
@@ -139,3 +140,189 @@ class FeedbackResponse(BaseModel):
     winner_id: int
     updated: bool = Field(description="Un résultat était déjà enregistré pour ce match (remplacé)")
     predictions: list[FeedbackOutcome]
+
+
+# ---------------------------------------------------------------------- consultation (interface de test, phase 8)
+
+
+class PlayerSummary(BaseModel):
+    """Un joueur tel que l'historique le connaît à une date (jamais après la dernière journée intégrée)."""
+
+    id: int
+    name: str | None
+    ioc: str | None = None
+    hand: str | None = None
+    height_cm: float | None = None
+    rank: float | None = Field(default=None, description="Dernier classement connu à cette date")
+    rank_points: float | None = None
+    age: float | None = Field(default=None, description="Âge à cette date")
+    last_match: dt.date | None = None
+    matches: int = Field(default=0, description="Matchs joués dans l'historique (forfaits exclus)")
+
+
+class PlayersResponse(BaseModel):
+    """`GET /players`."""
+
+    query: str | None
+    as_of: dt.date | None
+    count: int
+    players: list[PlayerSummary]
+
+
+class Record(BaseModel):
+    """Victoires et défaites sur un périmètre (toutes, une surface, un niveau de tournoi)."""
+
+    key: str
+    label: str
+    wins: int
+    losses: int
+    win_rate: float | None
+
+
+class Ratings(BaseModel):
+    """Elo et forme tels que le modèle les verrait pour un match du lendemain de l'historique."""
+
+    elo: float
+    matches: int
+    surface_elo: dict[str, float]
+    surface_matches: dict[str, int]
+    form: float = Field(description="Taux de victoire lissé sur les derniers matchs (feature `form_diff`)")
+
+
+class FormSummary(BaseModel):
+    """Les derniers matchs, du plus ancien au plus récent."""
+
+    window: int
+    wins: int
+    losses: int
+    results: list[bool]
+
+
+class RankingPoint(BaseModel):
+    """Classement publié au début d'un tournoi."""
+
+    date: dt.date
+    rank: float | None
+    rank_points: float | None
+
+
+class MatchLine(BaseModel):
+    """Un match d'un joueur, vu de son côté."""
+
+    match_id: str
+    match_date: dt.date
+    tourney_name: str | None
+    tourney_level: str | None
+    surface: str | None
+    round: str | None
+    opponent_id: int
+    opponent_name: str | None
+    opponent_rank: float | None
+    won: bool
+    score: str | None
+
+
+class PlayerStats(BaseModel):
+    """`GET /players/{id}/stats`."""
+
+    player: PlayerSummary
+    as_of: dt.date = Field(description="Date des statistiques (bornée à la dernière journée de l'historique)")
+    history_last_day: dt.date | None
+    ratings: Ratings | None = Field(description="Uniquement à la dernière journée : l'Elo n'est pas historisé")
+    overall: Record
+    last_52_weeks: Record
+    by_surface: list[Record]
+    by_level: list[Record]
+    form: FormSummary
+    ranking_history: list[RankingPoint]
+    recent: list[MatchLine]
+
+
+class PlayerRef(BaseModel):
+    """Identifiant et nom."""
+
+    id: int
+    name: str | None
+
+
+class H2HMeeting(BaseModel):
+    """Une rencontre entre les deux joueurs."""
+
+    match_id: str
+    match_date: dt.date
+    tourney_name: str | None
+    tourney_level: str | None
+    surface: str | None
+    round: str | None
+    winner_id: int
+    score: str | None
+
+
+class H2HSurface(BaseModel):
+    """Bilan des rencontres sur une surface."""
+
+    surface: str
+    p1_wins: int
+    p2_wins: int
+
+
+class H2HResponse(BaseModel):
+    """`GET /h2h`."""
+
+    player1: PlayerRef
+    player2: PlayerRef
+    as_of: dt.date | None
+    total: int
+    p1_wins: int
+    p2_wins: int
+    by_surface: list[H2HSurface]
+    meetings: list[H2HMeeting]
+
+
+FixtureStatus = Literal["upcoming", "awaiting_result", "played", "walkover"]
+
+
+class FixturePlayer(BaseModel):
+    """Un joueur d'un match prédit."""
+
+    id: int
+    name: str | None
+    win_probability: float
+
+
+class FixturePrediction(BaseModel):
+    """Un match prédit à l'avance, et son résultat une fois validé en base."""
+
+    match_id: str
+    match_date: dt.date
+    tourney_name: str | None
+    tourney_level: str | None
+    surface: str | None
+    round: str | None
+    player1: FixturePlayer
+    player2: FixturePlayer
+    predicted_winner_id: int
+    model_version: str
+    predicted_at: dt.datetime
+    client: str | None
+    status: FixtureStatus = Field(
+        description="upcoming (à jouer), awaiting_result (date passée, lot pas encore validé), played, walkover"
+    )
+    actual_winner_id: int | None = None
+    score: str | None = None
+    correct: bool | None = None
+    winner_probability: float | None = Field(default=None, description="Probabilité donnée au vrai vainqueur")
+
+
+class FixturesResponse(BaseModel):
+    """`GET /fixtures/predictions`."""
+
+    as_of: dt.date | None = Field(description="Dernière journée de l'historique")
+    watermark: dt.date | None = Field(description="Horloge simulée vue par la dernière ingestion")
+    since: dt.date
+    client: str | None
+    count: int
+    played: int
+    correct: int
+    accuracy: float | None
+    fixtures: list[FixturePrediction]

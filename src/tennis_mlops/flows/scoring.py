@@ -122,6 +122,7 @@ def fixture_request(fixture: dict[str, Any]) -> MatchRequest:
     return MatchRequest(
         match_id=fixture["match_id"], match_date=fixture["match_date"], surface=fixture.get("surface"),
         tourney_level=fixture.get("tourney_level"), round=fixture.get("round"), best_of=fixture.get("best_of"),
+        tourney_name=(fixture.get("tourney_name") or None) and str(fixture["tourney_name"])[:120],
         player1=player(fixture["player1"]), player2=player(fixture["player2"]),
     )  # fmt: skip
 

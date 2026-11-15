@@ -112,6 +112,18 @@ class MatchContext:
     best_of: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PlayerRatings:
+    """L'état d'un joueur dans le builder, exposé à l'interface (Elo, forme lissée)."""
+
+    elo: float
+    matches: int
+    surface_elo: dict[str, float]
+    surface_matches: dict[str, int]
+    form: float
+    last_match: date | None
+
+
 @dataclass(slots=True)
 class _PlayerState:
     elo: float
@@ -273,6 +285,18 @@ class FeatureBuilder:
     def known(self, player_id: int) -> bool:
         """Vrai si le joueur a au moins un match dans l'historique rejoué."""
         return player_id in self._players
+
+    def ratings(self, player_id: int) -> PlayerRatings:
+        """Elo général et par surface, et forme, tels que le modèle les voit pour un match à venir (lecture seule)."""
+        state = self._peek(player_id)
+        return PlayerRatings(
+            elo=round(state.elo, 1),
+            matches=state.matches,
+            surface_elo={k: round(v, 1) for k, v in sorted(state.surface_elo.items())},
+            surface_matches=dict(sorted(state.surface_matches.items())),
+            form=round(self._form(state), 4),
+            last_match=state.last_date,
+        )
 
     def _state(self, player_id: int) -> _PlayerState:
         state = self._players.get(player_id)

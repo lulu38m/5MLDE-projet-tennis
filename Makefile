@@ -6,7 +6,8 @@
         ingest lots gx-docs db train train-seq train-weak mlflow \
         registry promote rollback trace alert-preview alert-test \
         demo demo-stop demo-status simulate alerts \
-        api api-status predict predictions score feedback
+        api api-status predict predictions score feedback \
+        ui ui-open ui-smoke
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -23,6 +24,7 @@ API_URL ?= http://127.0.0.1:8000
 P1 ?= 104925
 P2 ?= 104745
 SURFACE ?= Clay
+UI_URL ?= http://127.0.0.1:8501
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
@@ -95,6 +97,7 @@ urls: ## Adresses des interfaces de la stack
 	@echo "MLflow (UI)            : http://127.0.0.1:7282"
 	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
 	@echo "API de prédiction      : $(API_URL)/docs  (make api-status, make predict)"
+	@echo "Interface de test      : $(UI_URL)  (make ui-open)"
 	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
 	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
 
@@ -215,3 +218,14 @@ score: ## Prédit les matchs de la semaine à venir via l'API (chaque pas de `ma
 
 feedback: ## Remonte à l'API les vrais résultats des matchs prédits (chaque pas de `make demo` le fait aussi)
 	$(UV) python -m tennis_mlops.flows.feedback
+
+# --------------------------------------------------------------------------- interface web de test (phase 8)
+
+ui: ## Lance l'interface en local, sans Docker (le service `ui` de la stack fait la même chose)
+	$(UV) python -m tennis_mlops.ui --port 8501
+
+ui-open: ## Ouvre l'interface de test dans le navigateur
+	$(UV) python -m webbrowser -t "$(UI_URL)"
+
+ui-smoke: ## Test de fumée sur la stack : la page Match prédit, la prédiction est tracée avec le client `ui`
+	$(UV) python -m tennis_mlops.ui.smoke --ui-url $(UI_URL)

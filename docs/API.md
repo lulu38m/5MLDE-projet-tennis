@@ -31,6 +31,10 @@ flowchart LR
 | `GET /ready` | `ready` ou `degraded` (200 : on sert) ; `not_ready` (503 : pas de modèle ou pas d'historique) |
 | `POST /admin/reload` | relire tout de suite l'alias et l'historique (jeton `X-Admin-Token` si `TENNIS_ADMIN_TOKEN` est défini) |
 | `GET /metrics` | métriques Prometheus |
+| `GET /players`, `/players/{id}/stats`, `/h2h` | (phase 8) joueurs, statistiques, face-à-face, tirés de l'historique validé |
+| `GET /fixtures/predictions` | (phase 8) matchs prédits à l'avance par le scoring, et leur résultat une fois validé |
+
+Les endpoints de consultation servent l'interface de test : voir [`UI.md`](UI.md).
 
 ```sh
 make predict P1=104925 P2=104745 SURFACE=Clay     # Djokovic contre Nadal, demi-finale de Masters sur terre
@@ -53,7 +57,8 @@ make predict P1=104925 P2=104745 SURFACE=Clay     # Djokovic contre Nadal, demi-
 ### Ce qu'on envoie
 
 Un match : `player1` et `player2` (au moins leur `id` Sackmann), et si possible la surface, le niveau du tournoi
-(`G`, `M`, `A`, `F`, `D`, `O`), le tour (`R128` … `F`, `RR`) et le format (`best_of` 3 ou 5). Le reste est déduit :
+(`G`, `M`, `A`, `F`, `D`, `O`), le tour (`R128` … `F`, `RR`), le format (`best_of` 3 ou 5) et le nom du tournoi
+(`tourney_name`, seulement affiché). Le reste est déduit :
 
 - **le profil du joueur** (dernier classement, points, âge vieilli jusqu'au jour du match, taille, main) vient de
   son match le plus récent en base ; une valeur envoyée le remplace (le scoring envoie le classement publié pour le

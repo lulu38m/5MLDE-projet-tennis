@@ -21,23 +21,30 @@ import threading
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 from tennis_mlops.config import ApiConfig
-from tennis_mlops.features.builder import FEATURE_COLUMNS, MatchContext, PlayerSnapshot
+from tennis_mlops.features.builder import FEATURE_COLUMNS, PLAYED_STATUSES, MatchContext, PlayerSnapshot
 from tennis_mlops.registry.loader import ServedModel
 from tennis_mlops.serving.features import FeatureSnapshot, FeatureStore
 from tennis_mlops.serving.model import ModelHolder
 from tennis_mlops.serving.persistence import EPSILON, ApiStore, AsyncWriter, to_json
 from tennis_mlops.serving.schemas import (
     FeedbackOutcome,
+    FixturePlayer,
+    FixturePrediction,
+    FixturesResponse,
+    H2HResponse,
     MatchRequest,
     ModelRef,
     PlayerInput,
     PlayerOutput,
+    PlayerRef,
+    PlayersResponse,
+    PlayerStats,
     Prediction,
 )
 
@@ -59,6 +66,10 @@ class InvalidMatchError(ValueError):
 
 class UnknownMatchError(LookupError):
     """Résultat d'un match dont le vainqueur n'est aucun des deux joueurs prédits."""
+
+
+class UnknownPlayerError(LookupError):
+    """Joueur sans aucun match joué dans l'historique validé (identifiant faux, ou débutant)."""
 
 
 @dataclass(frozen=True)
@@ -208,7 +219,8 @@ class PredictionService:
                 "prediction_id": prediction.prediction_id, "request_id": request_id, "created_at": now,
                 "client": client, "match_id": prediction.match_id, "match_date": prediction.match_date,
                 "surface": request.surface, "tourney_level": request.tourney_level, "round": request.round,
-                "best_of": request.best_of, "p1_id": prediction.player1.id, "p2_id": prediction.player2.id,
+                "best_of": request.best_of, "tourney_name": request.tourney_name, "p1_id": prediction.player1.id,
+                "p2_id": prediction.player2.id,
                 "p1_name": prediction.player1.name, "p2_name": prediction.player2.name,
                 "p1_win_probability": prediction.player1.win_probability,
                 "predicted_winner_id": prediction.predicted_winner_id, "model_name": batch.served.name,
@@ -269,6 +281,80 @@ class PredictionService:
                 )
             )
         return updated, outcomes
+
+    # ------------------------------------------------------------------ consultation (interface de test)
+
+    def _history(self) -> FeatureSnapshot:
+        snapshot = self.features.current
+        if snapshot is None:
+            msg = "historique des matchs pas encore chargé (base injoignable ?)"
+            raise ServiceUnavailableError(msg)
+        return snapshot
+
+    def search_players(self, query: str | None, limit: int = 20) -> PlayersResponse:
+        """`GET /players` : par nom (sans accents ni casse) ou identifiant ; sans texte, les joueurs classés actifs."""
+        snapshot = self._history()
+        found = snapshot.history.search(snapshot.summaries, query, limit)
+        return PlayersResponse(query=query, as_of=snapshot.last_day, count=len(found), players=found)
+
+    def player_stats(self, player_id: int, as_of: date | None = None) -> PlayerStats:
+        """`GET /players/{id}/stats` : bilans, forme, classement, derniers résultats (jamais après l'historique)."""
+        snapshot = self._history()
+        profile = snapshot.summaries.get(player_id)
+        if profile is None:
+            msg = (f"joueur {player_id} : aucun match joué dans l'historique validé (identifiant inconnu, ou "
+                   "débutant : il sera prédit avec l'Elo de départ)")  # fmt: skip
+            raise UnknownPlayerError(msg)
+        ratings = snapshot.builder.ratings(player_id)
+        return snapshot.history.stats(profile, as_of, ratings, form_window=snapshot.builder.config.form_window)
+
+    def head_to_head(self, p1: int, p2: int, as_of: date | None = None) -> H2HResponse:
+        """`GET /h2h` : rencontres validées des deux joueurs (un joueur inconnu a simplement zéro rencontre)."""
+        if p1 == p2:
+            msg = "p1 et p2 doivent être deux joueurs différents"
+            raise InvalidMatchError(msg)
+        snapshot = self._history()
+        refs = [PlayerRef(id=pid, name=getattr(snapshot.summaries.get(pid), "name", None)) for pid in (p1, p2)]
+        return snapshot.history.h2h(refs[0], refs[1], as_of)
+
+    def fixture_predictions(self, days: int = 14, client: str | None = "scoring") -> FixturesResponse:
+        """`GET /fixtures/predictions` : matchs prédits à l'avance depuis `days` jours, et leur résultat validé."""
+        snapshot = self._history()
+        anchor = max(d for d in (snapshot.watermark, snapshot.last_day, date.min) if d is not None)
+        since = anchor - timedelta(days=days) if anchor != date.min else date.min
+        out = [self._fixture(row, snapshot) for row in self.store.fixture_predictions(since, client or None)]
+        judged = [f for f in out if f.correct is not None]
+        correct = sum(1 for f in judged if f.correct)
+        return FixturesResponse(
+            as_of=snapshot.last_day, watermark=snapshot.watermark, since=since, client=client or None,
+            count=len(out), played=len(judged), correct=correct,
+            accuracy=round(correct / len(judged), 4) if judged else None, fixtures=out,
+        )  # fmt: skip
+
+    @staticmethod
+    def _fixture(row: dict[str, Any], snapshot: FeatureSnapshot) -> FixturePrediction:
+        p1 = float(row["p1_win_probability"])
+        status, winner, correct, winner_probability = "upcoming", None, None, None
+        result = row["result_status"]
+        match_day = _as_date(row["match_date"])
+        if result in PLAYED_STATUSES:
+            status, winner = "played", int(row["actual_winner_id"])
+            correct = winner == row["predicted_winner_id"]
+            winner_probability = round(p1 if winner == row["p1_id"] else 1 - p1, 6)
+        elif result is not None:
+            status, winner = "walkover", int(row["actual_winner_id"])
+        elif snapshot.last_day is not None and match_day <= snapshot.last_day:
+            status = "awaiting_result"
+        return FixturePrediction(
+            match_id=row["match_id"], match_date=match_day,
+            tourney_name=row["tourney_name"] or row["result_tourney_name"], tourney_level=row["tourney_level"],
+            surface=row["surface"], round=row["round"],
+            player1=FixturePlayer(id=row["p1_id"], name=row["p1_name"], win_probability=round(p1, 6)),
+            player2=FixturePlayer(id=row["p2_id"], name=row["p2_name"], win_probability=round(1 - p1, 6)),
+            predicted_winner_id=row["predicted_winner_id"], model_version=row["model_version"],
+            predicted_at=row["created_at"], client=row["client"], status=status,  # type: ignore[arg-type]
+            actual_winner_id=winner, score=row["score"], correct=correct, winner_probability=winner_probability,
+        )  # fmt: skip
 
     # ------------------------------------------------------------------ état
 
@@ -339,6 +425,14 @@ def _clean(value: object) -> float | str | None:
     if isinstance(value, int | bool):
         return float(value)
     return str(value)
+
+
+def _as_date(value: object) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
 
 
 def _iso(value: date | datetime | None) -> str | None:

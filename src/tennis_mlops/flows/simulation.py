@@ -1,11 +1,11 @@
-"""Flow Prefect de simulation : un pas de temps simulé, puis un passage d'ingestion. Planifié par `make demo`.
+"""Flow Prefect de simulation : un pas de temps simulé, puis ingestion, feedback et scoring. Planifié par `make demo`.
 
 ```
-POST /admin/clock/advance (+7 jours) ─► ingestion-atp (sous-flow) ─┬─► lots validés ─► pipeline_events
-                                                                     │     └─► assez de nouveaux matchs ?
-                                                                     │           └─► tennis.training.requested
-                                                                     │                 └─► automation ─► entraînement
-                                                                     └─► quarantaine / dégradé ─► alerte
+POST /admin/clock/advance (+7 jours) ─► ingestion-atp ─┬─► lots validés ─► assez de nouveaux matchs ?
+                                                         │                     └─► événement ─► entraînement
+                                                         └─► quarantaine / dégradé ─► alerte
+                                     ─► feedback-atp : vrais résultats des matchs prédits ─► POST /feedback
+                                     ─► scoring-atp  : matchs de la semaine à venir      ─► POST /predict/batch
 ```
 
 - **Un incident = une alerte** : l'issue de l'ingestion (quarantaine, dégradé) est portée par le sous-flow
@@ -14,6 +14,9 @@ POST /admin/clock/advance (+7 jours) ─► ingestion-atp (sous-flow) ─┬─�
 - **Horloge injoignable** : le pas est sauté mais l'ingestion tourne quand même ; c'est elle qui constate la panne
   (état « Dégradé », une alerte).
 - **Fin du rejeu** (`simulation.replay_end`) : plus rien à avancer ; le flow le dit et ne fait rien d'autre.
+- **Feedback puis scoring** (phase 7), en sous-flows eux aussi : d'abord les résultats que l'ingestion vient de
+  valider, puis les prédictions de la semaine à venir. Si la source est injoignable (ingestion « Dégradé »), le
+  scoring, qui en dépend, n'est pas lancé : la panne a déjà son alerte.
 
 Lancement : planifié par le déploiement `simulation-atp` (`make demo`), ou `python -m tennis_mlops.flows.simulation`.
 """
@@ -32,7 +35,9 @@ from pydantic import BaseModel
 
 from tennis_mlops.config import DEFAULT_CONFIG_PATH, ProjectConfig, Settings
 from tennis_mlops.data.errors import SourceUnavailableError
-from tennis_mlops.flows.ingest import IngestionReport, ingest_flow
+from tennis_mlops.flows.feedback import feedback_flow
+from tennis_mlops.flows.ingest import DEGRADED_STATE, IngestionReport, ingest_flow
+from tennis_mlops.flows.scoring import scoring_flow
 from tennis_mlops.orchestration.clock import ClockStep, ReplayFinishedError, SimulationClock
 
 FLOW_NAME = "simulation-atp"
@@ -48,6 +53,8 @@ class SimulationReport(BaseModel):
     tournaments: list[str] = []
     ingestion: str = "non lancée"  # nom de l'état final du sous-flow : Completed, Failed, Dégradé…
     ingestion_summary: str = ""
+    feedback: str = "non lancé"
+    scoring: str = "non lancé"
     finished: bool = False
     detail: str = ""
 
@@ -56,8 +63,9 @@ class SimulationReport(BaseModel):
         if self.finished:
             return f"fin du rejeu : {self.detail}"
         clock = f"{self.previous} → {self.now}, {self.new_matches} match(s) terminé(s)" if self.now else self.detail
-        return f"pas de {self.days} jour(s) : {clock} ; ingestion {self.ingestion}" + (
-            f" ({self.ingestion_summary})" if self.ingestion_summary else ""
+        ingestion = f"ingestion {self.ingestion}" + (f" ({self.ingestion_summary})" if self.ingestion_summary else "")
+        return f"pas de {self.days} jour(s) : {clock} ; {ingestion} ; feedback : {self.feedback} ; " + (
+            f"scoring : {self.scoring}"
         )
 
 
@@ -109,8 +117,21 @@ def simulation_flow(days: int | None = None, config_path: str | None = None) -> 
         report.ingestion_summary = result.summary()
     elif isinstance(result, BaseException):
         report.ingestion_summary = f"{type(result).__name__} : {result}"[:300]
+    report.feedback = _outcome(feedback_flow(return_state=True))
+    if report.ingestion == DEGRADED_STATE:
+        report.scoring = "sauté (source injoignable)"
+    else:
+        report.scoring = _outcome(scoring_flow(config_path=str(path), return_state=True))
     logger.info(report.summary())
     return report
+
+
+def _outcome(state: Any) -> str:  # noqa: ANN401
+    """Bilan d'un sous-flow, ou son état s'il a échoué (il porte alors sa propre alerte)."""
+    result = state.result(raise_on_failure=False)
+    if isinstance(result, BaseException):
+        return f"{state.name} ({type(result).__name__})"
+    return str(result.summary()) if hasattr(result, "summary") else str(state.name)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

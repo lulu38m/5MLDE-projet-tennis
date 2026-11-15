@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     mlflow_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:7282")
     alert_host: str = Field(default="", description="Poste affiché dans les cartes (défaut : nom de la machine)")
     alert_owner: str = Field(default="", description="Prénom affiché dans les cartes, dans un canal partagé")
+    # Phase 7 : l'API écrit avec son propre compte (app_writer), qui ne peut que lire les tables d'ingestion.
+    api_postgres_dsn: SecretStr = SecretStr("postgresql://app_writer:app-writer-local@127.0.0.1:5433/tennis")
+    admin_token: SecretStr | None = Field(default=None, description="Si défini, exigé par POST /admin/reload")
 
     def alert_origin(self) -> str:
         """Le poste qui envoie : `TENNIS_ALERT_HOST` (le Makefile y met le nom du Mac), sinon le nom de la machine."""
@@ -56,11 +59,19 @@ class Settings(BaseSettings):
 
     def sqlalchemy_url(self) -> str:
         """URL SQLAlchemy (pilote psycopg 3) à partir du DSN PostgreSQL ; les autres schémas passent tels quels."""
-        dsn = self.postgres_dsn.get_secret_value()
-        for prefix in ("postgresql://", "postgres://"):
-            if dsn.startswith(prefix):
-                return "postgresql+psycopg://" + dsn.removeprefix(prefix)
-        return dsn
+        return _sqlalchemy(self.postgres_dsn)
+
+    def api_sqlalchemy_url(self) -> str:
+        """Même chose pour le compte de l'API."""
+        return _sqlalchemy(self.api_postgres_dsn)
+
+
+def _sqlalchemy(dsn_secret: SecretStr) -> str:
+    dsn = dsn_secret.get_secret_value()
+    for prefix in ("postgresql://", "postgres://"):
+        if dsn.startswith(prefix):
+            return "postgresql+psycopg://" + dsn.removeprefix(prefix)
+    return dsn
 
 
 class _StrictModel(BaseModel):
@@ -198,6 +209,16 @@ class OrchestrationConfig(_StrictModel):
     )
 
 
+class ApiConfig(_StrictModel):
+    """API de prédiction (phase 7)."""
+
+    model_refresh_s: int = Field(default=30, ge=5, description="Relecture de l'alias production toutes les N s")
+    features_refresh_s: int = Field(default=30, ge=5, description="Vérification des nouveaux matchs toutes les N s")
+    max_batch: int = Field(default=200, ge=1, le=1000, description="Matchs au plus par POST /predict/batch")
+    write_queue: int = Field(default=10_000, ge=100, description="Lignes en attente d'écriture avant d'en perdre")
+    write_flush_s: float = Field(default=0.5, gt=0, le=10, description="Écriture en base par paquets, toutes les N s")
+
+
 class DemoConfig(_StrictModel):
     """Réglages qui rendent la démo lisible, sans effet sur les résultats."""
 
@@ -213,6 +234,7 @@ class ProjectConfig(_StrictModel):
     ingestion: IngestionConfig = IngestionConfig()
     demo: DemoConfig = DemoConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
+    api: ApiConfig = ApiConfig()
 
     @model_validator(mode="after")
     def _check_simulation_within_data(self) -> Self:

@@ -38,7 +38,7 @@ flowchart LR
 | `entrainement-atp/sur-evenement` | Une campagne à la fois (`ENQUEUE`) : lancée par l'automation, ou à la main depuis l'UI. Le nombre de candidats en parallèle vient de `configs/train.yaml`. |
 | `ingestion-atp/manuelle` | Un passage d'ingestion depuis l'UI (la simulation l'appelle elle-même en sous-flow). |
 | automation « tennis · réentraînement » | `tennis.training.requested` sur la ressource `tennis.dataset.atp` → lance `entrainement-atp/sur-evenement`. |
-| automation « tennis · alertes » | `prefect.flow-run.Failed`, `Crashed` ou `Dégradé` d'un de nos trois flows → `POST /prefect` du service d'alertes (bloc `Webhook` `tennis-alert-sink`). |
+| automation « tennis · alertes » | `prefect.flow-run.Failed`, `Crashed` ou `Dégradé` d'un de nos flows (simulation, ingestion, entraînement, et depuis la phase 7 scoring et feedback) → `POST /prefect` du service d'alertes (bloc `Webhook` `tennis-alert-sink`). |
 
 Tout est créé par `python -m tennis_mlops.orchestration setup`, lancé **à chaque `make up`** par le service ponctuel
 `orchestration-setup` : rien à cliquer dans l'UI, et une modification de `configs/project.yaml` est appliquée au
@@ -69,8 +69,10 @@ orchestration:
 
 ## Un pas de simulation
 
-`simulation-atp` fait deux choses : `POST /admin/clock/advance` (seule écriture du projet vers la source, sur son
-API d'administration que le chaos ne touche jamais), puis le flow `ingestion-atp` **en sous-flow**.
+`simulation-atp` fait avancer l'horloge (`POST /admin/clock/advance`, seule écriture du projet vers la source, sur
+son API d'administration que le chaos ne touche jamais), puis lance trois **sous-flows** : `ingestion-atp`, puis
+(phase 7) `feedback-atp`, qui remonte à l'API le vrai résultat des matchs prédits, et `scoring-atp`, qui prédit les
+matchs de la semaine à venir ([`API.md`](API.md)).
 
 - **Un incident = une alerte.** L'issue de l'ingestion (quarantaine, dégradé) est portée par le sous-flow, qui
   déclenche sa propre alerte ; la simulation se termine normalement et écrit l'issue dans son bilan. Si elle
@@ -78,6 +80,8 @@ API d'administration que le chaos ne touche jamais), puis le flow `ingestion-atp
 - **Horloge injoignable** : le pas est sauté mais l'ingestion tourne quand même ; c'est elle qui constate la panne
   (état « Dégradé », une alerte).
 - **Fin du rejeu** (`simulation.replay_end`, mai 2026) : plus rien à avancer, le flow le dit et ne fait rien d'autre.
+- **Source injoignable** : le scoring, qui en dépend, n'est pas lancé (la panne a déjà sa carte) ; le feedback, qui ne
+  lit que la base et l'API, l'est.
 
 ## Le réentraînement déclenché par un événement
 

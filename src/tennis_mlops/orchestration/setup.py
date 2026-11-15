@@ -46,6 +46,7 @@ TAGS = ["tennis-mlops"]
 WEBHOOK_BLOCK = "tennis-alert-sink"
 ALERTS_AUTOMATION = "tennis · alertes"
 TRAINING_AUTOMATION = "tennis · réentraînement"
+SUBFLOWS = ("scoring-atp", "feedback-atp")  # lancés par la simulation, sans déploiement à eux : surveillés aussi
 ALERT_STATES = ("Failed", "Crashed", DEGRADED_STATE)
 # Ce que l'automation transmet au service d'alertes : des identifiants, le service relit le reste (alerts/sink.py).
 WEBHOOK_PAYLOAD = (
@@ -220,5 +221,6 @@ def setup(client: SyncPrefectClient, config: ProjectConfig, training_workers: in
     webhook = ensure_webhook(alert_sink_url)
     lines.append(f"bloc webhook {WEBHOOK_BLOCK} → {alert_sink_url.rstrip('/')}/prefect")
     lines.append(ensure_automation(client, training_automation(ids["entrainement-atp"])))
-    lines.append(ensure_automation(client, alerts_automation(webhook, [s.flow_name for s in specs])))
+    watched = [s.flow_name for s in specs] + list(SUBFLOWS)
+    lines.append(ensure_automation(client, alerts_automation(webhook, watched)))
     return lines

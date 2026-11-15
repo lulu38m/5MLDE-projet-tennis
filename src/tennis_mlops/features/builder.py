@@ -7,7 +7,8 @@ Le builder rejoue l'historique dans l'ordre chronologique, une journée à la fo
 
 Deux matchs du même jour ne se voient donc jamais, et le résultat d'un match n'entre jamais dans ses propres
 features. Une seule fonction, `_features()`, calcule les features : l'entraînement (`build`) et l'API
-(`features_for`) passent par elle, ce qui écarte tout écart entre entraînement et service.
+(`features_for`) passent par elle, ce qui écarte tout écart entre entraînement et service. Elle ne modifie pas l'état :
+l'API peut la lancer depuis plusieurs threads à la fois sur le même builder.
 
 Orientation : la colonne `label` vaut 1 si le **joueur 1** gagne. Qui est joueur 1 est tiré de façon déterministe à
 partir du `match_id` (empreinte SHA-256) : environ un match sur deux, le vainqueur est le joueur 2. Sans ça, le
@@ -201,13 +202,14 @@ class FeatureBuilder:
 
     def _features(self, context: MatchContext, p1: PlayerSnapshot, p2: PlayerSnapshot) -> dict[str, Any]:
         cfg = self.config
-        s1, s2 = self._state(p1.player_id), self._state(p2.player_id)
+        s1, s2 = self._peek(p1.player_id), self._peek(p2.player_id)  # lecture seule : l'API partage l'état
         surface = context.surface
         e1, e2 = s1.elo, s2.elo
         se1 = s1.surface_elo.get(surface, cfg.elo_start) if surface else e1
         se2 = s2.surface_elo.get(surface, cfg.elo_start) if surface else e2
         blended = (1 - cfg.surface_weight) * (e1 - e2) + cfg.surface_weight * (se1 - se2)
-        h2h_won, h2h_lost = self._h2h[(p1.player_id, p2.player_id)], self._h2h[(p2.player_id, p1.player_id)]
+        h2h_won = self._h2h.get((p1.player_id, p2.player_id), 0)
+        h2h_lost = self._h2h.get((p2.player_id, p1.player_id), 0)
         return {
             "rank_log_ratio": _log_ratio(p2.rank, p1.rank),
             "points_log_ratio": _log1p_diff(p1.rank_points, p2.rank_points),
@@ -263,6 +265,14 @@ class FeatureBuilder:
         winner.surface_elo[surface] = we + self._k(wn) * surprise
         loser.surface_elo[surface] = le - self._k(ln) * surprise
         winner.surface_matches[surface], loser.surface_matches[surface] = wn + 1, ln + 1
+
+    def _peek(self, player_id: int) -> _PlayerState:
+        """État d'un joueur sans le créer : un joueur jamais vu a l'état de départ (Elo initial, aucun match)."""
+        return self._players.get(player_id) or _PlayerState(elo=self.config.elo_start)
+
+    def known(self, player_id: int) -> bool:
+        """Vrai si le joueur a au moins un match dans l'historique rejoué."""
+        return player_id in self._players
 
     def _state(self, player_id: int) -> _PlayerState:
         state = self._players.get(player_id)

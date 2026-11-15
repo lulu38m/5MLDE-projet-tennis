@@ -51,3 +51,10 @@ orchestration:
   # rollback, promotion. Une version refusée par la règle de mise en service n'est jamais envoyée (décision normale).
   teams_events: [echec, quarantaine, degrade, rollback]
   alert_cooldown_min: 30         # un incident qui persiste (même lot, même panne) : une carte par demi-heure au plus
+
+api:
+  model_refresh_s: 30            # relecture de l'alias production (promotion, rollback servis sans redémarrage)
+  features_refresh_s: 30         # nouveaux matchs en base ? l'historique est rejoué (quelques secondes)
+  max_batch: 200                 # matchs au plus par POST /predict/batch
+  write_queue: 10000             # traces en attente d'écriture ; au-delà, elles sont perdues et comptées
+  write_flush_s: 0.5             # les traces partent en base par paquets, sans faire attendre la réponse

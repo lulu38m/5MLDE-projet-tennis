@@ -5,7 +5,8 @@
         up down logs ps urls mock clock advance chaos \
         ingest lots gx-docs db train train-seq train-weak mlflow \
         registry promote rollback trace alert-preview alert-test \
-        demo demo-stop demo-status simulate alerts
+        demo demo-stop demo-status simulate alerts \
+        api api-status predict predictions score feedback
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -18,6 +19,10 @@ WORKERS ?=
 VERSION ?=
 EXAMPLE ?=
 REASON ?=
+API_URL ?= http://127.0.0.1:8000
+P1 ?= 104925
+P2 ?= 104745
+SURFACE ?= Clay
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
@@ -89,6 +94,7 @@ urls: ## Adresses des interfaces de la stack
 	@echo "Prefect (UI)           : http://127.0.0.1:4201"
 	@echo "MLflow (UI)            : http://127.0.0.1:7282"
 	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
+	@echo "API de prédiction      : $(API_URL)/docs  (make api-status, make predict)"
 	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
 	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
 
@@ -186,3 +192,26 @@ comma := ,
 clean: ## Supprime les caches locaux
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# --------------------------------------------------------------------------- API de prédiction (phase 7)
+
+api: ## Lance l'API en local, sans Docker (le service `api` de la stack fait la même chose)
+	$(UV) python -m tennis_mlops.api serve --port 8000
+
+api-status: ## État de l'API : prête ou dégradée, version servie, historique, qualité en ligne
+	@curl -sS $(API_URL)/ready | $(UV) python -m json.tool
+	@curl -fsS $(API_URL)/model | $(UV) python -m json.tool
+
+predict: ## Une prédiction : `make predict P1=104925 P2=104745 SURFACE=Clay` (Djokovic contre Nadal)
+	@curl -sS -X POST $(API_URL)/predict -H 'Content-Type: application/json' -H 'X-Client: make' \
+	  -d '{"surface": "$(SURFACE)", "tourney_level": "M", "round": "SF", "best_of": 3, "player1": {"id": $(P1)}, "player2": {"id": $(P2)}}' \
+	  | $(UV) python -m json.tool
+
+predictions: ## Dernières prédictions : version, durée de la requête, vrai résultat
+	$(UV) python -m tennis_mlops.api outcomes
+
+score: ## Prédit les matchs de la semaine à venir via l'API (chaque pas de `make demo` le fait aussi)
+	$(UV) python -m tennis_mlops.flows.scoring
+
+feedback: ## Remonte à l'API les vrais résultats des matchs prédits (chaque pas de `make demo` le fait aussi)
+	$(UV) python -m tennis_mlops.flows.feedback

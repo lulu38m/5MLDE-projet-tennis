@@ -23,6 +23,8 @@ FLOW_LABELS = {
     "ingestion-atp": "l'ingestion ATP",
     TRAINING_FLOW: "l'entraînement",
     "simulation-atp": "la simulation",
+    "scoring-atp": "le scoring",
+    "feedback-atp": "la remontée des résultats",
 }
 NEXT_STEPS = {
     "ingestion-atp": "Les données déjà en base restent utilisables. Lire la cause dans Prefect, corriger, puis "
@@ -30,6 +32,10 @@ NEXT_STEPS = {
     TRAINING_FLOW: "Rien ne change côté service : l'API garde la version en production. Lire la cause dans "
     "Prefect, corriger, puis relancer `make train`.",
     "simulation-atp": "`make demo-stop` suspend la simulation le temps de corriger ; `make demo` la relance.",
+    "scoring-atp": "Les matchs à venir ne sont pas prédits tant que l'API ne répond pas : vérifier `make api-status` "
+    "et `make logs` ; le prochain pas rattrapera les matchs encore à venir.",
+    "feedback-atp": "Les résultats restent en base : le prochain passage les remontera. Vérifier que l'API répond "
+    "(`make api-status`).",
 }
 CHECK_LABELS = {
     "expect_tennis_score_to_be_valid": "Score lisible",

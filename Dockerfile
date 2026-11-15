@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #    (« No module named mock_source.__main__ »). On rend donc le code lisible par tous, quel que soit l'umask local.
 COPY src ./src
 COPY configs ./configs
-RUN chmod -R a+rX /app/src /app/configs
+RUN chmod -R a+rX /app/src /app/configs /app/pyproject.toml /app/uv.lock /app/README.md
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 

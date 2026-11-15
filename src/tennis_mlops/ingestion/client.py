@@ -104,6 +104,10 @@ class MockSourceClient:
         """`GET /tournaments/{id}/results` : un lot (résultats + `expected_matches`)."""
         return self._get(f"/tournaments/{tourney_id}/results")
 
+    def fixtures(self, days: int | None = None) -> SourcePayload:
+        """`GET /fixtures` : matchs à venir dont les deux joueurs sont connus (scoring, phase 7)."""
+        return self._get("/fixtures", {"days": str(days)} if days else None)
+
     def results(self, since: date, until: date) -> SourcePayload:
         """`GET /results` : matchs terminés dans `[since ; until[` (amorçage de l'historique)."""
         return self._get("/results", {"since": since.isoformat(), "until": until.isoformat()})

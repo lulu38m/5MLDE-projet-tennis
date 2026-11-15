@@ -1,10 +1,11 @@
-"""Flow de simulation : un pas d'horloge puis un passage d'ingestion, un incident = une alerte, fin du rejeu."""
+"""Flow de simulation : un pas d'horloge, ingestion, feedback, scoring ; un incident = une alerte ; fin du rejeu."""
 
 from datetime import date
 from typing import Any
 
 import httpx
 import pytest
+from prefect import flow
 
 from mock_source.chaos import ChaosMode, ChaosSettings
 from tennis_mlops.config import ProjectConfig, Settings
@@ -21,7 +22,27 @@ def sim(world: FlowWorld, monkeypatch: pytest.MonkeyPatch) -> FlowWorld:
 
     monkeypatch.setattr(simulation, "clock_factory", clock)
     monkeypatch.setattr(ingest, "training_event_emitter", lambda **_: None)
+    monkeypatch.setattr(simulation, "feedback_flow", fake_feedback)  # scoring et feedback : leurs propres tests
+    monkeypatch.setattr(simulation, "scoring_flow", fake_scoring)
     return world
+
+
+class Done:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def summary(self) -> str:
+        return self.text
+
+
+@flow(name="feedback-atp")
+def fake_feedback() -> Done:
+    return Done("aucun résultat à remonter")
+
+
+@flow(name="scoring-atp")
+def fake_scoring(config_path: str | None = None) -> Done:
+    return Done("3 match(s) prédit(s)")
 
 
 def step(world: FlowWorld, days: int) -> tuple[Any, SimulationReport]:
@@ -36,6 +57,7 @@ def test_each_step_advances_the_clock_then_ingests(sim: FlowWorld) -> None:
     assert (report.previous, report.now, report.tournaments) == (date(2019, 1, 6), date(2019, 1, 14), ["2019-0001"])
     assert report.new_matches == 7 and report.ingestion == "Completed"
     assert "1 lot(s) stocké(s)" in report.ingestion_summary and sim.store.count_matches() == 7
+    assert (report.feedback, report.scoring) == ("aucun résultat à remonter", "3 match(s) prédit(s)")
 
 
 def test_an_ingestion_incident_does_not_fail_the_simulation(sim: FlowWorld) -> None:
@@ -48,6 +70,7 @@ def test_an_ingestion_incident_does_not_fail_the_simulation(sim: FlowWorld) -> N
     sim.env.chaos.configure(ChaosSettings(mode=ChaosMode.UNAVAILABLE, failures=50))
     _, degraded = step(sim, 1)
     assert degraded.ingestion == "Dégradé" and degraded.now == date(2019, 3, 12)  # l'horloge, elle, a avancé
+    assert degraded.scoring == "sauté (source injoignable)"  # la panne a déjà son alerte
 
 
 def test_unreachable_clock_still_runs_the_ingestion(sim: FlowWorld, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -23,6 +23,7 @@ x-internal: &internal
   PREFECT_API_URL: http://prefect:4200/api
   TENNIS_MOCK_SOURCE_URL: http://mock_source:8001
   TENNIS_ALERT_SINK_URL: http://alert_sink:8090
+  TENNIS_API_URL: http://api:8000
   TENNIS_PREFECT_UI_URL: "http://127.0.0.1:${PREFECT_PORT:-4201}"
   TENNIS_MLFLOW_UI_URL: "http://127.0.0.1:${MLFLOW_PORT:-7282}"
   MLFLOW_DISABLE_AGENT_HINT: "1"
@@ -41,6 +42,16 @@ configs:
       SELECT 'CREATE DATABASE prefect OWNER prefect' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'prefect')\gexec
       SELECT 'CREATE ROLE mlflow LOGIN PASSWORD ''${MLFLOW_DB_PASSWORD:-mlflow-local}''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mlflow')\gexec
       SELECT 'CREATE DATABASE mlflow OWNER mlflow' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow')\gexec
+      -- Phase 7 : l'API écrit ses traces avec son propre compte ; Grafana ne fait que lire.
+      SELECT 'CREATE ROLE app_writer LOGIN PASSWORD ''${APP_WRITER_DB_PASSWORD:-app-writer-local}''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_writer')\gexec
+      SELECT 'CREATE ROLE grafana_reader LOGIN PASSWORD ''${GRAFANA_DB_PASSWORD:-grafana-reader-local}''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_reader')\gexec
+      \connect tennis
+      GRANT CONNECT ON DATABASE tennis TO app_writer, grafana_reader;
+      GRANT USAGE, CREATE ON SCHEMA public TO app_writer;
+      GRANT USAGE ON SCHEMA public TO grafana_reader;
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_writer, grafana_reader;
+      ALTER DEFAULT PRIVILEGES FOR ROLE tennis IN SCHEMA public GRANT SELECT ON TABLES TO app_writer, grafana_reader;
+      ALTER DEFAULT PRIVILEGES FOR ROLE app_writer IN SCHEMA public GRANT SELECT ON TABLES TO tennis, grafana_reader;
 
 services:
   mock_source:
@@ -199,6 +210,32 @@ services:
         limits:
           memory: 512m
 
+  api:
+    # API de prédiction (phase 7) : sert la version désignée par l'alias production, trace chaque requête dans
+    # PostgreSQL avec le compte app_writer (lecture seule sur les tables d'ingestion).
+    <<: *app
+    command: ["python", "-m", "tennis_mlops.api", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *internal
+      TENNIS_API_POSTGRES_DSN: "postgresql://app_writer:${APP_WRITER_DB_PASSWORD:-app-writer-local}@postgres:5432/tennis"
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      postgres-setup:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
   worker:
     # Exécute les runs des déploiements (simulation, ingestion, entraînement) dans ce conteneur : chaque run est un
     # sous-processus, avec les adresses internes ci-dessus. L'état (quarantaine, Great Expectations) est partagé
@@ -218,6 +255,8 @@ services:
       mock_source:
         condition: service_healthy
       mlflow:
+        condition: service_healthy
+      api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]

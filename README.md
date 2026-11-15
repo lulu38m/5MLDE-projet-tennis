@@ -20,6 +20,7 @@ make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, worke
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
 make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraînement sur événement, alertes Teams
+make predict    # une prédiction de l'API (Djokovic contre Nadal sur terre battue)
 ```
 
 ## Commandes
@@ -60,6 +61,10 @@ make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraî
 | `make simulate DAYS=14` | Un seul pas de simulation, sans planning |
 | `make alerts` | Dernières alertes : envoyée, filtrée, répétée, sans webhook, en échec |
 | `make alert-preview` / `make alert-test` | Cartes Teams d'exemple en JSON / UNE carte « 🧪 TEST » au webhook |
+| `make predict P1=… P2=… SURFACE=…` | Une prédiction de l'API (par défaut Djokovic contre Nadal sur terre) |
+| `make api-status` | API prête ou dégradée, version servie, historique, qualité en ligne |
+| `make predictions` | Dernières prédictions : version, durée de la requête, vrai résultat |
+| `make score` / `make feedback` | Prédire les matchs de la semaine / remonter les vrais résultats (faits aussi par `make demo`) |
 
 ## Organisation du code
 
@@ -74,10 +79,11 @@ make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraî
 | `src/tennis_mlops/flows/` | Flows Prefect (`ingest.py`, `train.py`, `simulation.py`) |
 | `src/tennis_mlops/orchestration/` | Déploiements, automations, déclenchement par événement, journal `pipeline_events` |
 | `src/tennis_mlops/alerts/` | Cartes Teams (Adaptive Cards) et service d'alertes `alert_sink` |
+| `src/tennis_mlops/serving/`, `src/tennis_mlops/api/` | Service de prédiction (historique rejoué, modèle servi, traces) et son API FastAPI |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md` |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md` |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -172,6 +178,23 @@ observation (`staging`).
 - **Traçabilité** : `make trace` remonte de la version au run MLflow, au run Prefect, aux lots validés et à la source.
 
 Alias, tags, règle, cycle de vie, démo : [`docs/TAGGING.md`](docs/TAGGING.md).
+
+## API de prédiction
+
+Le service `api` (`http://127.0.0.1:8000/docs`) sert la version désignée par l'alias `production` : pour un match à
+venir, la probabilité de victoire de chaque joueur, la version et un `request_id`. Les features sont calculées par le
+**même** `FeatureBuilder` que l'entraînement, sur l'historique validé rejoué jusqu'à la veille : aucun match passé ne
+peut être prédit avec son propre résultat.
+
+- **Sans redémarrage** : l'alias est relu toutes les 30 s ; une promotion ou un rollback est servi tout seul.
+- **MLflow arrêté** : la version en cache continue de servir, `/ready` passe en `degraded` (scénario S8).
+- **Tout est tracé** dans PostgreSQL : requêtes, prédictions (version, features), erreurs (`422` détaillés), vrais
+  résultats. `prediction_outcomes` donne, pour une prédiction, sa version, sa durée et son résultat réel ;
+  `online_metrics` l'accuracy, la log loss et le Brier en ligne par version.
+- **Boucle complète** : chaque pas de `make demo` remonte les résultats validés (`POST /feedback`) puis prédit les
+  matchs de la semaine à venir (`POST /predict/batch`).
+
+Détails : [`docs/API.md`](docs/API.md).
 
 ## Orchestration et alertes
 

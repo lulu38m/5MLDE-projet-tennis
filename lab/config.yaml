@@ -1,0 +1,41 @@
+# Labo d'entraînement : réglages versionnés, tracés dans MLflow avec chaque essai (expérience `lab-atp`).
+
+experiment: lab-atp
+train_start: 2011-01-01          # 2010 sert d'échauffement : Elo et statistiques partent de zéro
+inner_validation_months: 12      # arrêt anticipé des boostings sur les 12 derniers mois du jeu d'entraînement
+refit_full: true                 # puis réentraînement sur tout le jeu d'entraînement, avec le nombre d'arbres trouvé
+
+seasons:                         # validation « walk-forward » : chaque saison est prédite par un modèle qui ne
+  tune: [2021, 2022, 2023]       #   connaît que les saisons d'avant ; Optuna ne regarde QUE celles-ci
+  eval: [2024, 2025]             # le classement des essais se fait ici
+  holdout: [2026]                # test final (janvier à mai 2026) : seulement avec --holdout, à la fin
+
+features:                        # paramètres du rejeu (lab/features.py, FeatureParams)
+  elo_start: 1500
+  k_numerator: 150
+  k_offset: 20
+  k_shape: 0.3
+  surface_weight: 0.5
+  mov_weight: 1.0
+  stats_half_life: 40
+  surface_stats_half_life: 20
+  form_half_life: 15
+  shrink_points: 300
+  retired_k_factor: 0.5
+
+feature_sets:                    # sous-ensembles de colonnes (expressions régulières), choisis par --features
+  all: [".*"]
+  elo: ["_elo", "elo_prob", "elo_logit", "^surface$", "tourney_level", "round", "best_of"]
+  no_stats: ["^(?!.*(spw|rpw|first_in|ace_rate|df_rate|bp_|markov)).*$"]
+  diffs: ["^d_", "_prob$", "_logit$", "^surface$", "tourney_level", "^round$", "best_of", "round_order", "h2h_n",
+          "lefty_vs_righty"]
+
+recency_half_life_years: 0       # > 0 : les saisons récentes pèsent plus (poids divisé par 2 tous les N ans)
+
+models:                          # hyperparamètres de départ (lab run) ; lab tune les remplace par les meilleurs
+  elo: {}
+  logreg: {C: 0.05}
+  hgb: {}
+  lightgbm: {}
+  xgboost: {}
+  catboost: {}

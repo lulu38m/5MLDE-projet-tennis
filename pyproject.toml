@@ -37,6 +37,14 @@ dev = [
     "types-pyyaml==6.0.12.20261103",
 ]
 
+# Labo d'entraînement (lab/) : jamais installé dans l'image Docker ; `uv sync --group lab` sur la machine qui expérimente.
+lab = [
+    "catboost==1.2.10",
+    "lightgbm==4.7.0",
+    "optuna==4.9.0",
+    "xgboost==3.4.1",
+]
+
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"
@@ -45,7 +53,7 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "lab"]
 
 [tool.ruff.lint]
 select = [
@@ -76,13 +84,18 @@ convention = "google"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "lab"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 # GX et Prefect exposent leurs classes publiques sans les réexporter explicitement.
 module = ["great_expectations.*", "prefect.*"]
 implicit_reexport = true
+
+[[tool.mypy.overrides]]
+# Bibliothèques du labo (groupe `lab`) : pas d'annotations publiées.
+module = ["lightgbm.*", "xgboost.*", "catboost.*", "optuna.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # scikit-learn et skops ne publient pas d'annotations de types (ni stubs ni py.typed).

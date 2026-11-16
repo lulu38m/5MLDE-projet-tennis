@@ -200,6 +200,19 @@ peut être prédit avec son propre résultat.
 
 Détails : [`docs/API.md`](docs/API.md).
 
+## Labo d'entraînement
+
+À côté du pipeline, `lab/` cherche le meilleur modèle possible sans contrainte de réintégration : environ 150
+features (Elo par surface et avec marge, service et retour corrigés de l'adversaire, chaîne de Markov, forme,
+fatigue…), modèles symétriques (régression logistique, LightGBM, XGBoost, CatBoost), réglage Optuna et ensembles,
+validés saison par saison et tracés dans MLflow (expérience `lab-atp`). Sur 2024–2025, l'ensemble fait une log loss
+de 0,603 et 66,4 % d'accuracy, contre 0,617 et 65,3 % pour le modèle du pipeline. Détails :
+[`lab/README.md`](lab/README.md).
+
+```sh
+make lab-install && make lab-reference && make lab-tune MODEL=lightgbm TRIALS=50 && make lab-leaderboard
+```
+
 ## Interface web de test
 
 Le service `ui` (`http://127.0.0.1:8501`, `make ui-open`) permet d'essayer le modèle sans terminal. Il ne parle qu'à

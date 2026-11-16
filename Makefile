@@ -7,7 +7,8 @@
         registry promote rollback trace alert-preview alert-test \
         demo demo-stop demo-status simulate alerts \
         api api-status predict predictions score feedback \
-        ui ui-open ui-smoke
+        ui ui-open ui-smoke \
+        lab-install lab-features lab-reference lab-run lab-tune lab-ensemble lab-leaderboard lab-final lab-mlflow
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -25,6 +26,11 @@ P1 ?= 104925
 P2 ?= 104745
 SURFACE ?= Clay
 UI_URL ?= http://127.0.0.1:8501
+MODEL ?= lightgbm
+FEATURES ?= all
+TRIALS ?= 50
+FIT ?=
+LAB := uv run --locked --group lab python -m lab
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
@@ -229,3 +235,32 @@ ui-open: ## Ouvre l'interface de test dans le navigateur
 
 ui-smoke: ## Test de fumée sur la stack : la page Match prédit, la prédiction est tracée avec le client `ui`
 	$(UV) python -m tennis_mlops.ui.smoke --ui-url $(UI_URL)
+
+# --------------------------------------------------------------------------- labo d'entraînement (lab/, à côté du pipeline)
+
+lab-install: ## Installe les bibliothèques du labo (LightGBM, XGBoost, CatBoost, Optuna), hors image Docker
+	uv sync --locked --group lab
+
+lab-features: ## Calcule les features du labo (mises en cache dans state/lab/)
+	$(LAB) features
+
+lab-reference: ## La référence à battre : le modèle actuel du pipeline, sur les mêmes saisons
+	$(LAB) reference
+
+lab-run: ## Un essai : make lab-run MODEL=lightgbm FEATURES=all
+	$(LAB) run --model $(MODEL) --features $(FEATURES)
+
+lab-tune: ## Réglage Optuna : make lab-tune MODEL=catboost TRIALS=100
+	$(LAB) tune --model $(MODEL) --trials $(TRIALS)
+
+lab-ensemble: ## Ensemble des meilleurs essais de chaque famille (FIT=1 : poids appris sur les saisons tune)
+	$(LAB) ensemble $(if $(FIT),--fit,)
+
+lab-leaderboard: ## Classement des essais : log loss et accuracy
+	$(LAB) leaderboard
+
+lab-final: ## Test final sur la saison 2026, une fois les choix arrêtés
+	$(LAB) final
+
+lab-mlflow: ## MLflow local du labo (si celui de la stack ne tournait pas) sur http://127.0.0.1:7283
+	$(UV) mlflow ui --backend-store-uri sqlite:///state/lab/mlflow.db --port 7283

@@ -1,0 +1,790 @@
+{
+  "uid": "tennis-croise",
+  "title": "Tennis · Croisé",
+  "description": "Par version de modèle, par incident, par âge du modèle : le coût et la qualité ensemble.",
+  "tags": [
+    "tennis-mlops"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Dashboards tennis-mlops",
+      "type": "dashboards",
+      "tags": [
+        "tennis-mlops"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "Incidents",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT e.occurred_at AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'failure' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Dégradations",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "orange",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT e.occurred_at AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'warning' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Mises en service",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "green",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT e.occurred_at AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'success' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Autres événements",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "blue",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT e.occurred_at AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'info' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Le nouveau modèle coûte-t-il plus cher ?",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "type": "table",
+      "title": "Qualité et latence par version",
+      "description": "Depuis le début (vue online_metrics) : une ligne par version servie",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT 'v' || model_version AS version, predictions AS prédictions, with_feedback AS jugées, accuracy, log_loss AS \"log loss\", brier, mean_request_ms AS \"latence moyenne\" FROM online_metrics ORDER BY LPAD(model_version, 6, '0')",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accuracy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latence moyenne"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "type": "barchart",
+      "title": "Accuracy et latence par version",
+      "description": "Une version plus juste mais plus lente se voit tout de suite",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT 'v' || model_version AS version, accuracy, mean_request_ms AS \"latence (ms)\" FROM online_metrics WHERE with_feedback > 0 ORDER BY LPAD(model_version, 6, '0')",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accuracy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latence (ms)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "version",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "type": "row",
+      "title": "Que font les incidents aux erreurs et aux prédictions ?",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4
+    },
+    {
+      "type": "state-timeline",
+      "title": "Incident en cours sur la source",
+      "description": "make chaos MODE=503 · slow · corrupt · schema",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "tennis_source_chaos{mode!=\"off\"}",
+          "legendFormat": "{{mode}}",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "normal",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "en cours",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 5
+    },
+    {
+      "type": "timeseries",
+      "title": "Erreurs de l'API et services injoignables",
+      "description": "Les annotations rouges et orange sont les incidents du journal (lot refusé, ingestion dégradée)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(rate(tennis_api_requests_total{job=\"api\",status=~\"[45]..\"}[$__rate_interval])) or vector(0))",
+          "legendFormat": "erreurs API (req/s)",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "count(tennis_service_up == 0) or vector(0)",
+          "legendFormat": "services injoignables",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "erreurs API (req/s)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "services injoignables"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 6
+    },
+    {
+      "type": "timeseries",
+      "title": "Matchs joués sans prédiction préalable",
+      "description": "À chaque lot ingéré : ses matchs avaient-ils été prédits ? Une source en panne pendant le scoring en laisse passer",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT date_trunc('minute', m.ingested_at) AS time, COUNT(*) FILTER (WHERE p.match_id IS NULL) AS \"sans prédiction\", COUNT(*) FILTER (WHERE p.match_id IS NOT NULL) AS \"prédits avant\" FROM matches m LEFT JOIN (SELECT DISTINCT match_id FROM predictions WHERE client = 'scoring') p ON p.match_id = m.match_id WHERE $__timeFilter(m.ingested_at) AND m.match_date >= (SELECT MIN(match_date) FROM predictions WHERE client = 'scoring') GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sans prédiction"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "prédits avant"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 7
+    },
+    {
+      "type": "row",
+      "title": "Quand réentraîner ? Combien coûte une bonne prédiction ?",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 8
+    },
+    {
+      "type": "barchart",
+      "title": "Accuracy selon l'ancienneté du modèle",
+      "description": "Jours simulés entre la fin des données d'entraînement et le match, par tranches de 30 : une baisse avec l'âge dit qu'il faut réentraîner plus souvent",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT LPAD((FLOOR((p.match_date - p.model_data_end) / 30.0) * 30)::int::text, 4, '0') || ' j' AS \"âge du modèle\", AVG(CASE WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS accuracy, COUNT(*) AS matchs FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND p.model_data_end IS NOT NULL AND p.match_date > p.model_data_end GROUP BY 1 ORDER BY 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "matchs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "âge du modèle",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 9
+    },
+    {
+      "type": "timeseries",
+      "title": "Coût CPU d'une bonne prédiction",
+      "description": "Secondes de CPU de l'API par prédiction jugée juste (fenêtre de 15 min)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(tennis_container_cpu_seconds_total{service=\"api\"}[15m])) / (sum(rate(tennis_api_feedback_predictions_total{job=\"api\",correct=\"true\"}[15m])) > 0)",
+          "legendFormat": "CPU-s",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 10
+    },
+    {
+      "type": "barchart",
+      "title": "Latence selon la taille du batch",
+      "description": "Un batch amortit le coût fixe d'un appel : la latence par match baisse",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT CASE WHEN predictions <= 1 THEN '1' WHEN predictions <= 10 THEN '2-10' WHEN predictions <= 50 THEN '11-50' WHEN predictions <= 100 THEN '51-100' ELSE '101+' END AS \"matchs par appel\", AVG(duration_ms) AS \"latence moyenne\", AVG(duration_ms / NULLIF(predictions, 0)) AS \"par match\", COUNT(*) AS appels FROM api_requests WHERE path IN ('/predict', '/predict/batch') AND status_code = 200 AND predictions > 0 AND $__timeFilter(received_at) GROUP BY 1 ORDER BY MIN(predictions)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "appels"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "matchs par appel",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 11
+    }
+  ]
+}

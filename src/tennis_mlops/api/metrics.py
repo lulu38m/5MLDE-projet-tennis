@@ -43,6 +43,9 @@ class ApiMetrics:
         self.writer_dropped = Gauge("tennis_api_writer_dropped", "Traces perdues (file pleine)", registry=r)
         self.writer_failed = Gauge("tennis_api_writer_failed", "Traces refusées par la base", registry=r)
         self.ready = Gauge("tennis_api_ready", "2 = prêt, 1 = dégradé, 0 = pas prêt", registry=r)
+        self.drift = Gauge("tennis_api_feature_drift_psi", "PSI des entrées récentes contre la période d'entraînement",
+                           ["feature"], registry=r)  # fmt: skip
+        self.drift_sample = Gauge("tennis_api_drift_sample", "Prédictions récentes comparées", registry=r)
         self._served: tuple[str, str] | None = None
 
     def render(self, service: PredictionService) -> bytes:
@@ -68,6 +71,10 @@ class ApiMetrics:
         self.writer_dropped.set(service.writer.dropped)
         self.writer_failed.set(service.writer.failed)
         self.ready.set({"ready": 2, "degraded": 1}.get(service.readiness().status, 0))
+        drift = service.drift_report()
+        for feature, value in drift.psi.items():
+            self.drift.labels(feature).set(value)
+        self.drift_sample.set(drift.sample)
         return generate_latest(self.registry)
 
 

@@ -13,7 +13,7 @@ registre (rollback, promotion)                 ─► POST /registry ─┼─�
   les lots refusés dans `pipeline_events`, la campagne dans MLflow, la version servie et les données disponibles.
 - **Filtre** : seuls les types de `orchestration.teams_events` partent sur Teams ; les autres sont gardés dans
   l'historique (`make alerts`) avec le statut `filtered`. Sans webhook, rien ne part (`disabled`).
-- **Pas de rafale** : la simulation repasse toutes les 2 minutes ; un incident qui persiste (le même lot refusé, la
+- **Pas de rafale** : la simulation repasse chaque minute ; un incident qui persiste (le même lot refusé, la
   source toujours injoignable) ne renvoie une carte qu'après `orchestration.alert_cooldown_min` (statut `repeated`
   entre-temps). Le canal Teams est partagé avec la classe.
 - **Jamais bloquant** : une lecture qui échoue donne une carte moins riche, pas d'erreur ; l'URL du webhook n'est

@@ -7,7 +7,8 @@
         registry promote rollback trace alert-preview alert-test \
         demo demo-stop demo-status simulate alerts \
         api api-status predict predictions score feedback \
-        ui ui-open ui-smoke
+        ui ui-open ui-smoke \
+        dashboards grafana grafana-check prometheus
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -25,6 +26,8 @@ P1 ?= 104925
 P2 ?= 104745
 SURFACE ?= Clay
 UI_URL ?= http://127.0.0.1:8501
+GRAFANA_URL ?= http://127.0.0.1:3001
+PROMETHEUS_URL ?= http://127.0.0.1:9091
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
 PREFECT_API_URL ?= http://127.0.0.1:4201/api
 export PREFECT_API_URL
@@ -98,6 +101,8 @@ urls: ## Adresses des interfaces de la stack
 	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
 	@echo "API de prédiction      : $(API_URL)/docs  (make api-status, make predict)"
 	@echo "Interface de test      : $(UI_URL)  (make ui-open)"
+	@echo "Grafana (dashboards)   : $(GRAFANA_URL)  (make grafana ; admin pour modifier)"
+	@echo "Prometheus             : $(PROMETHEUS_URL)/targets  (make prometheus)"
 	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
 	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
 
@@ -161,7 +166,7 @@ alerts: ## Dernières alertes et ce qu'elles sont devenues (envoyée, filtrée, 
 
 # --------------------------------------------------------------------------- orchestration (phase 6)
 
-demo: up ## Chaîne automatique : +7 jours simulés toutes les 2 min, ingestion, réentraînement sur événement, alertes
+demo: up ## Chaîne automatique : +7 jours simulés chaque minute, ingestion, réentraînement sur événement, alertes
 	$(UV) python -m tennis_mlops.orchestration start
 
 demo-stop: ## Met la simulation planifiée en pause (le run en cours se termine)
@@ -229,3 +234,17 @@ ui-open: ## Ouvre l'interface de test dans le navigateur
 
 ui-smoke: ## Test de fumée sur la stack : la page Match prédit, la prédiction est tracée avec le client `ui`
 	$(UV) python -m tennis_mlops.ui.smoke --ui-url $(UI_URL)
+
+# --------------------------------------------------------------------------- monitoring (phase 9)
+
+dashboards: ## Régénère les dashboards Grafana (infra/grafana/dashboards/*.json) depuis leur code Python
+	$(UV) python -m tennis_mlops.monitoring.dashboards
+
+grafana: ## Ouvre les dashboards Grafana (lecture sans compte)
+	$(UV) python -m webbrowser -t "$(GRAFANA_URL)/dashboards/f/tennis-mlops"
+
+grafana-check: ## Vérifie Prometheus, Grafana, et chaque requête de chaque dashboard, sur la stack qui tourne
+	TENNIS_GRAFANA_UI_URL=$(GRAFANA_URL) TENNIS_PROMETHEUS_URL=$(PROMETHEUS_URL) $(UV) python -m tennis_mlops.monitoring.check
+
+prometheus: ## Ouvre Prometheus sur l'état de ses cibles
+	$(UV) python -m webbrowser -t "$(PROMETHEUS_URL)/targets"

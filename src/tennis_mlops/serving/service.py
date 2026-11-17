@@ -29,6 +29,7 @@ import pandas as pd
 from tennis_mlops.config import ApiConfig
 from tennis_mlops.features.builder import FEATURE_COLUMNS, PLAYED_STATUSES, MatchContext, PlayerSnapshot
 from tennis_mlops.registry.loader import ServedModel
+from tennis_mlops.serving.drift import DRIFT_FEATURES, DriftMonitor, DriftReport
 from tennis_mlops.serving.features import FeatureSnapshot, FeatureStore
 from tennis_mlops.serving.model import ModelHolder
 from tennis_mlops.serving.persistence import EPSILON, ApiStore, AsyncWriter, to_json
@@ -112,6 +113,10 @@ class PredictionService:
     _stop: threading.Event = field(default_factory=threading.Event, init=False)
     _thread: threading.Thread | None = field(default=None, init=False)
     _refresh_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    drift: DriftMonitor = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.drift = DriftMonitor(self.config.drift_window, self.config.drift_reference_days)
 
     # ------------------------------------------------------------------ cycle de vie
 
@@ -189,6 +194,7 @@ class PredictionService:
             prepared.append((request, day, p1, p2, warnings))
         frame = pd.concat(rows, ignore_index=True)[list(FEATURE_COLUMNS)]
         probabilities = served.model.predict_proba(frame)[:, 1]
+        self.drift.observe(frame[[c for c in DRIFT_FEATURES if c in frame]].to_dict("records"))  # type: ignore[arg-type]
         out = []
         for (request, day, p1, p2, warnings), probability, features in zip(
             prepared, probabilities, frame.to_dict("records"), strict=True
@@ -214,6 +220,7 @@ class PredictionService:
     ) -> None:
         """Dépose les prédictions dans la file d'écriture."""
         now = datetime.now(UTC)
+        data_end = _tag_date(batch.served.tags.get("data_window_end"))
         for request, prediction in zip(requests, batch.predictions, strict=True):
             self.writer.put("predictions", {
                 "prediction_id": prediction.prediction_id, "request_id": request_id, "created_at": now,
@@ -227,6 +234,7 @@ class PredictionService:
                 "model_version": batch.served.version, "run_id": batch.served.run_id,
                 "features_as_of": prediction.features_as_of, "batch_size": len(batch.predictions),
                 "features": to_json(prediction.features), "warnings": to_json(prediction.warnings),
+                "model_data_end": data_end,
             })  # fmt: skip
 
     @staticmethod
@@ -410,11 +418,26 @@ class PredictionService:
         }  # fmt: skip
         info["features"] = snapshot.as_dict() if snapshot else None
         info["limits"] = {"max_batch": self.config.max_batch}
+        info["drift"] = self.drift_report().as_dict()
         return info
+
+    def drift_report(self) -> DriftReport:
+        """Dérive des dernières entrées servies contre la période d'entraînement du modèle servi."""
+        snapshot, served = self.features.current, self.model.served
+        data_end = _tag_date(served.tags.get("data_window_end")) if served else None
+        return self.drift.report(snapshot.history_features if snapshot else None, data_end)
 
 
 TAGS_SHOWN = ("lifecycle", "candidate", "promoted_at", "decided_by", "gate_status", "features_version",
               "data_window_end", "simulated_now", "dataset_version", "test.log_loss", "git_sha")  # fmt: skip
+
+
+def _tag_date(value: object) -> date | None:
+    """Une date de tag MLflow (`2015-12-31`, ou un horodatage ISO), ou None si absente ou illisible."""
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
 
 
 def _clean(value: object) -> float | str | None:

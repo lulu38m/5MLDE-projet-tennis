@@ -1,6 +1,7 @@
-# Stack locale du projet. Les services s'ajoutent phase par phase (prometheus, grafana…).
+# Stack locale du projet. Les services s'ajoutent phase par phase.
 # Ports publiés sur 127.0.0.1 uniquement : rien n'est exposé sur le réseau.
-# Ports d'hôte décalés (Postgres 5433, Prefect 4201, MLflow 7282) pour coexister avec la stack des TP.
+# Ports d'hôte décalés (Postgres 5433, Prefect 4201, MLflow 7282, Grafana 3001, Prometheus 9091) pour coexister avec
+# la stack des TP.
 name: tennis-mlops
 
 x-app: &app
@@ -247,7 +248,7 @@ services:
       TENNIS_API_UI_URL: "http://127.0.0.1:${API_PORT:-8000}"
       TENNIS_MLFLOW_UI_URL: "http://127.0.0.1:${MLFLOW_PORT:-7282}"
       TENNIS_PREFECT_UI_URL: "http://127.0.0.1:${PREFECT_PORT:-4201}"
-      TENNIS_GRAFANA_UI_URL: "http://127.0.0.1:${GRAFANA_PORT:-3000}"
+      TENNIS_GRAFANA_UI_URL: "http://127.0.0.1:${GRAFANA_PORT:-3001}"
     ports:
       - "127.0.0.1:${UI_PORT:-8501}:8501"
     depends_on:
@@ -297,6 +298,104 @@ services:
         limits:
           memory: 3g
 
+  # --------------------------------------------------------------------------- phase 9 : monitoring
+
+  exporter:
+    # Ce que l'API ne mesure pas : santé des services, horloge simulée, mode d'incident de la source, runs Prefect
+    # (monitoring/exporter.py), et CPU / mémoire de chaque conteneur du projet lus sur l'API Docker, comme
+    # `docker stats` (monitoring/containers.py). Ni .env ni identifiants.
+    # Le socket Docker n'est lisible que par root : seul ce service tourne en root. Il n'envoie que des GET
+    # (liste et statistiques des conteneurs) ; « :ro » protège le fichier, pas l'API.
+    <<: *app
+    env_file: []
+    user: "0:0"
+    command: ["python", "-m", "tennis_mlops.monitoring", "--port", "9101", "--compose-project", "tennis-mlops"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      TENNIS_MLFLOW_TRACKING_URI: http://mlflow:7282
+      TENNIS_MOCK_SOURCE_URL: http://mock_source:8001
+      TENNIS_PREFECT_API_URL: http://prefect:4200/api
+      TENNIS_API_URL: http://api:8000
+      TENNIS_ALERT_SINK_URL: http://alert_sink:8090
+    healthcheck:
+      # Port ouvert suffit : lire /metrics lancerait une passe de sondes.
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9101), 3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"
+    depends_on:
+      - exporter
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  grafana:
+    # Dashboards et sources de données provisionnés depuis le dépôt (infra/grafana). Lecture anonyme (Viewer) : on
+    # ouvre un dashboard sans se connecter ; modifier demande le compte admin.
+    image: grafana/grafana:13.2.3
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${TENNIS_GRAFANA_ADMIN_PASSWORD:-admin-local}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/technique.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Lu par provisioning/datasources/datasources.yml (compte grafana_reader, lecture seule).
+      GRAFANA_DB_PASSWORD: "${GRAFANA_DB_PASSWORD:-grafana-reader-local}"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      postgres-setup:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
 volumes:
   postgres_data:
   mlflow_artifacts:
+  prometheus_data:
+  grafana_data:

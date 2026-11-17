@@ -26,7 +26,7 @@ flowchart LR
 | `POST /predict` | un match → probabilité de chaque joueur, version, `request_id` |
 | `POST /predict/batch` | jusqu'à `api.max_batch` (200) matchs en un appel ; tous refusés si l'un ne peut pas l'être (son index est donné) |
 | `POST /feedback` | le vrai résultat d'un match → chaque prédiction de ce match est jugée |
-| `GET /model` | version servie et ses tags, état du registre, historique, qualité en ligne, limites |
+| `GET /model` | version servie et ses tags, état du registre, historique, qualité en ligne, dérive des entrées, limites |
 | `GET /health` | le processus répond (sonde de vie) |
 | `GET /ready` | `ready` ou `degraded` (200 : on sert) ; `not_ready` (503 : pas de modèle ou pas d'historique) |
 | `POST /admin/reload` | relire tout de suite l'alias et l'historique (jeton `X-Admin-Token` si `TENNIS_ADMIN_TOKEN` est défini) |
@@ -104,7 +104,7 @@ de la requête s'il est fourni, sinon généré).
 | Table | Une ligne par | Contenu |
 |---|---|---|
 | `api_requests` | requête | chemin, code, durée, client (`X-Client`), version, nombre de prédictions |
-| `predictions` | match prédit | `match_id`, joueurs, probabilité, version et `run_id`, features utilisées, avertissements |
+| `predictions` | match prédit | `match_id`, joueurs, probabilité, version et `run_id`, fin des données d'entraînement de la version (`model_data_end`), features utilisées, avertissements |
 | `errors` | réponse 4xx/5xx | type (`validation`, `invalid_match`, `unavailable`, `internal`…), message, détail (champs en erreur, pile) |
 | `feedbacks` | match dont on connaît le résultat | vainqueur, date de réception (un renvoi remplace, ne double pas) |
 
@@ -123,7 +123,7 @@ SELECT * FROM online_metrics;   -- accuracy, log loss, Brier et durée moyenne e
 
 `make predictions` affiche les dernières lignes de `prediction_outcomes`.
 
-**Comptes** : l'API écrit avec `app_writer`, qui ne peut que lire les tables d'ingestion ; Grafana lira avec
+**Comptes** : l'API écrit avec `app_writer`, qui ne peut que lire les tables d'ingestion ; Grafana lit avec
 `grafana_reader` (lecture seule). Les deux comptes et leurs droits sont créés par `postgres-setup` à chaque `make up`.
 
 ## Scoring et feedback
@@ -154,3 +154,4 @@ lancé : l'ingestion « Dégradé » a déjà son alerte. `make score` et `make 
 | `tennis_api_features_last_day_timestamp`, `_features_build_seconds`, `_features_players` | historique |
 | `tennis_api_writer_pending`, `_writer_dropped`, `_writer_failed` | file d'écriture |
 | `tennis_api_ready` | 2 prêt, 1 dégradé, 0 pas prêt |
+| `tennis_api_feature_drift_psi`, `tennis_api_drift_sample` | PSI de chaque feature : 500 dernières prédictions contre la période d'entraînement ([MONITORING.md](MONITORING.md)) |

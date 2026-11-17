@@ -33,7 +33,7 @@ def profile(frame: pd.DataFrame) -> dict[str, Any]:
             "std": float(values.std()) if len(values) else math.nan,
             "missing_rate": float(frame[column].isna().mean()),
             "edges": edges.tolist(),
-            "proportions": _proportions(values, edges).tolist(),
+            "proportions": proportions(values, edges).tolist(),
         }
     categorical = {
         column: {str(k): float(v) for k, v in frame[column].fillna("inconnu").value_counts(normalize=True).items()}
@@ -48,8 +48,8 @@ def drift(previous: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
     for column, ref in previous.get("numeric", {}).items():
         if column not in frame or len(ref["edges"]) < 2:
             continue
-        current = _proportions(frame[column].dropna().to_numpy(dtype=float), np.array(ref["edges"]))
-        scores[column] = _psi(np.array(ref["proportions"]), current)
+        current = proportions(frame[column].dropna().to_numpy(dtype=float), np.array(ref["edges"]))
+        scores[column] = psi(np.array(ref["proportions"]), current)
     for column, ref in previous.get("categorical", {}).items():
         if column not in frame:
             continue
@@ -57,7 +57,7 @@ def drift(previous: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
         categories = sorted(set(ref) | {str(c) for c in shares.index})
         expected = np.array([ref.get(c, 0.0) for c in categories])
         actual = np.array([float(shares.get(c, 0.0)) for c in categories])
-        scores[column] = _psi(expected, actual)
+        scores[column] = psi(expected, actual)
     over = sorted(c for c, s in scores.items() if s > PSI_ALERT)
     return {
         "psi": dict(sorted(scores.items(), key=lambda kv: -kv[1])),
@@ -67,7 +67,8 @@ def drift(previous: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _proportions(values: Array, edges: Array) -> Array:
+def proportions(values: Array, edges: Array) -> Array:
+    """Part des valeurs dans chaque intervalle délimité par `edges` (bornes extrêmes ouvertes)."""
     if len(edges) < 2 or len(values) == 0:
         return np.array([])
     inner = edges[1:-1]
@@ -76,7 +77,8 @@ def _proportions(values: Array, edges: Array) -> Array:
     return proportions
 
 
-def _psi(expected: Array, actual: Array) -> float:
+def psi(expected: Array, actual: Array) -> float:
+    """PSI entre deux répartitions sur les mêmes intervalles (0 si elles ne sont pas comparables)."""
     if len(expected) == 0 or len(expected) != len(actual):
         return 0.0
     e, a = np.clip(expected, _EPS, None), np.clip(actual, _EPS, None)

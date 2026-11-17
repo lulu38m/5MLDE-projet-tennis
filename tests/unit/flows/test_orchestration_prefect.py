@@ -55,14 +55,14 @@ def test_setup_is_idempotent_and_keeps_the_demo_running(capsys: pytest.CaptureFi
     with get_client(sync_client=True) as client:
         first = setup(client, config, 4, "http://alert_sink:8090")
         assert first[0] == "work pool tennis-pool créé"
-        assert "déploiement simulation-atp/planifiee (en pause, toutes les 120 s)" in first
+        assert "déploiement simulation-atp/planifiee (en pause, toutes les 60 s)" in first
         assert main(["start"]) == EXIT_OK
         out = capsys.readouterr().out
         assert "simulation lancée" in out and "aucun worker actif" in out  # personne pour exécuter : on le dit
 
         again = setup(client, config, 4, "http://alert_sink:8090")  # `make up` en pleine démo
         assert again[0] == "work pool tennis-pool : déjà là"
-        assert "déploiement simulation-atp/planifiee (actif, toutes les 120 s)" in again
+        assert "déploiement simulation-atp/planifiee (actif, toutes les 60 s)" in again
         assert f"automation « {ALERTS_AUTOMATION} » mise à jour" in again
 
         simulation = client.read_deployment_by_name("simulation-atp/planifiee")

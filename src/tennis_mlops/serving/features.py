@@ -23,6 +23,7 @@ import pandas as pd
 
 from tennis_mlops.features import FeatureBuilder, FeatureConfig
 from tennis_mlops.features.builder import PLAYED_STATUSES, PlayerSnapshot
+from tennis_mlops.serving.drift import DRIFT_FEATURES
 from tennis_mlops.serving.history import PlayerHistory
 from tennis_mlops.serving.schemas import PlayerSummary
 
@@ -88,6 +89,7 @@ class FeatureSnapshot:
     build_seconds: float
     watermark: date | None = None
     history: PlayerHistory = field(default_factory=lambda: PlayerHistory(pd.DataFrame()))
+    history_features: pd.DataFrame | None = None  # features des matchs rejoués : la référence de la dérive
     summaries: Mapping[int, PlayerSummary] = field(default_factory=dict)
 
     @property
@@ -164,8 +166,10 @@ class FeatureStore:
         matches = self.source.matches_frame()
         summary = self.source.lots_summary()
         builder = FeatureBuilder(self.config)
+        history_features = None
         if not matches.empty:
-            builder.build(matches)
+            built = builder.build(matches)
+            history_features = built[["match_date", *[c for c in DRIFT_FEATURES if c in built]]].copy()
         watermark = summary.get("watermark")
         profiles = player_profiles(matches)
         summaries = {pid: p.summary() for pid, p in profiles.items()}
@@ -179,6 +183,7 @@ class FeatureStore:
             watermark=date.fromisoformat(str(watermark)[:10]) if watermark else None,
             history=PlayerHistory(matches, summaries),
             summaries=summaries,
+            history_features=history_features,
         )
 
 

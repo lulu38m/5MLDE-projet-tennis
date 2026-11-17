@@ -16,7 +16,7 @@ qualité, le réentraînement, la mise en service et la supervision.
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, API, interface, worker… (`make urls`)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, API, interface, worker, Prometheus, Grafana… (`make urls`)
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
 make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraînement sur événement, alertes Teams
@@ -44,7 +44,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make clock [DATE=2019-06-01]` | Lit ou règle l'horloge simulée |
 | `make advance DAYS=7` | Fait avancer le temps simulé |
 | `make chaos MODE=503 FAILURES=2` | Incident contrôlé (`off`, `503`, `slow`, `corrupt`, `schema`) |
-| `make urls` | Adresses des interfaces (mock_source, Prefect, MLflow, PostgreSQL, rapports GX) |
+| `make urls` | Adresses des interfaces (mock_source, Prefect, MLflow, API, interface, Grafana, Prometheus, PostgreSQL) |
 | `make ingest` | Un passage d'ingestion : mock_source → Great Expectations → PostgreSQL |
 | `make lots` | Derniers lots ingérés : statut, volumes, contrôles en échec |
 | `make gx-docs` | Rapports HTML de Great Expectations |
@@ -57,7 +57,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make promote VERSION=3 REASON="…"` | Mise en production manuelle, raison obligatoire |
 | `make rollback REASON="…"` | Revient à la version `previous` |
 | `make trace [VERSION=3]` | Chaîne de traçabilité d'une version : run MLflow → run Prefect → lots → source |
-| `make demo` / `make demo-stop` | Lance / met en pause la simulation planifiée (un pas de 7 jours toutes les 2 min) |
+| `make demo` / `make demo-stop` | Lance / met en pause la simulation planifiée (un pas de 7 jours chaque minute) |
 | `make demo-status` | Déploiements Prefect, worker, derniers runs |
 | `make simulate DAYS=14` | Un seul pas de simulation, sans planning |
 | `make alerts` | Dernières alertes : envoyée, filtrée, répétée, sans webhook, en échec |
@@ -68,6 +68,9 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make score` / `make feedback` | Prédire les matchs de la semaine / remonter les vrais résultats (faits aussi par `make demo`) |
 | `make ui-open` / `make ui` | Ouvre l'interface de test (http://127.0.0.1:8501) / la lance hors Docker |
 | `make ui-smoke` | Test de fumée sur la stack : la page Match prédit et la prédiction est tracée avec le client `ui` |
+| `make grafana` / `make prometheus` | Ouvre les dashboards (http://127.0.0.1:3001, sans compte) / les cibles de Prometheus |
+| `make grafana-check` | Vérifie les cibles Prometheus, les sources Grafana et chaque requête de chaque dashboard |
+| `make dashboards` | Régénère les JSON des dashboards depuis leur code (`monitoring/dashboards.py`) |
 
 ## Organisation du code
 
@@ -84,10 +87,12 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `src/tennis_mlops/alerts/` | Cartes Teams (Adaptive Cards) et service d'alertes `alert_sink` |
 | `src/tennis_mlops/serving/`, `src/tennis_mlops/api/` | Service de prédiction (historique rejoué, modèle servi, traces) et son API FastAPI |
 | `src/tennis_mlops/ui/` | Interface web de test (Streamlit) : ne parle qu'à l'API |
+| `src/tennis_mlops/monitoring/` | Exporteur Prometheus de la chaîne, dashboards Grafana en code, `make grafana-check` |
+| `infra/` | Configuration de Prometheus et provisioning de Grafana (sources, dashboards générés) |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md` |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md` |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -217,16 +222,33 @@ arrêtée, aucun modèle, joueur inconnu, débutant). Détails : [`docs/UI.md`](
 
 ## Orchestration et alertes
 
-`make demo` lance une simulation planifiée dans Prefect : toutes les 2 minutes, le temps avance d'une semaine et
+`make demo` lance une simulation planifiée dans Prefect : chaque minute, le temps avance d'une semaine et
 l'ingestion récupère les tournois terminés. Au-delà de 200 nouveaux matchs validés, l'ingestion émet l'événement
 `tennis.training.requested` et une **automation** lance une campagne d'entraînement, soumise à la même règle de mise
 en service. Tout tourne dans le worker de la stack ; déploiements et automations sont créés à chaque `make up`.
 
 - **Une alerte par incident**, en carte Teams : flow en échec après ses retries, lot refusé par Great Expectations,
-  source injoignable, rollback. Un incident qui persiste n'est pas renvoyé toutes les 2 minutes.
+  source injoignable, rollback. Un incident qui persiste n'est pas renvoyé à chaque pas.
 - **Webhook secret** : `TENNIS_TEAMS_WEBHOOK_URL` dans `.env` uniquement ; sans lui, les cartes sont gardées dans
   l'historique (`make alerts`) sans être envoyées.
 - **Chronologie** : chaque fait marquant (lot validé ou refusé, demande d'entraînement, décision, alerte) est inscrit
   dans la table `pipeline_events`, pour les annotations Grafana.
 
 Détails : [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) et [`docs/ALERTES.md`](docs/ALERTES.md).
+
+## Monitoring
+
+Prometheus et Grafana font partie de la stack (`make grafana`, http://127.0.0.1:3001, lecture sans compte). Trois
+dashboards, provisionnés depuis le dépôt et écrits en Python :
+
+- **Technique** (temps réel) : trafic, latences p50/p95/p99, erreurs, CPU et mémoire par conteneur (API Docker), runs
+  et relances Prefect, version servie, disponibilité de chaque service.
+- **Métier** (temps **simulé** : l'axe est la date des matchs) : accuracy, log loss et Brier des prédictions faites
+  avant le match, calibration, favoris battus, couverture du feedback, dérive des entrées (PSI).
+- **Croisé** : qualité et latence par version, effet d'un incident (matchs joués sans prédiction préalable), accuracy
+  selon l'âge du modèle, coût CPU d'une bonne prédiction, latence selon la taille du batch.
+
+Les incidents et décisions de `pipeline_events` y sont posés en annotations (rouge, orange, vert, bleu). Un
+exporteur ajoute ce que l'API ne mesure pas : CPU et mémoire de chaque conteneur (API Docker), santé des services,
+horloge simulée, mode d'incident de la source, runs Prefect. `make grafana-check` fait exécuter chaque requête par
+Grafana. Détails : [`docs/MONITORING.md`](docs/MONITORING.md).

@@ -1,6 +1,6 @@
 # Orchestration : la chaîne qui tourne seule
 
-`make demo` démarre la stack puis lance une **simulation planifiée** : toutes les 2 minutes réelles, l'horloge de
+`make demo` démarre la stack puis lance une **simulation planifiée** : chaque minute réelle, l'horloge de
 `mock_source` avance d'une semaine, l'ingestion récupère les tournois qui viennent de se terminer, et dès que
 200 nouveaux matchs validés se sont accumulés, un **événement** déclenche une campagne d'entraînement. Un incident
 (lot refusé, source injoignable, flow en échec) produit **une** carte Teams. Personne n'intervient.
@@ -13,7 +13,7 @@ Code : `src/tennis_mlops/orchestration/` (`setup.py`, `trigger.py`, `events.py`,
 ```mermaid
 flowchart LR
     subgraph Prefect["Serveur Prefect"]
-        S[["simulation-atp/planifiee<br/>toutes les 120 s"]]
+        S[["simulation-atp/planifiee<br/>toutes les 60 s"]]
         A1{{"automation<br/>tennis · réentraînement"}}
         A2{{"automation<br/>tennis · alertes"}}
     end
@@ -61,7 +61,7 @@ Réglages (`configs/project.yaml`, section `orchestration`) :
 ```yaml
 orchestration:
   simulation_days_per_run: 7     # jours simulés par pas
-  simulation_interval_s: 120     # un pas toutes les 2 minutes réelles
+  simulation_interval_s: 60      # un pas par minute réelle ; un pas en retard est sauté
   training_trigger_matches: 200  # nouveaux matchs validés avant de demander un réentraînement (0 = jamais)
   teams_events: [echec, quarantaine, degrade, rollback]
   alert_cooldown_min: 30
@@ -110,7 +110,7 @@ et le jeu est reconstruit. Le cache expire au bout de 7 jours.
 ## Le journal `pipeline_events`
 
 Une table de la base du projet, une ligne par fait marquant, avec ses identifiants (run Prefect, lot, version) :
-c'est la chronologie que liront les annotations Grafana (phase 10).
+c'est la chronologie que liront les annotations Grafana (phase 9, [MONITORING.md](MONITORING.md)).
 
 | `kind` | Écrit par | Gravité |
 |---|---|---|

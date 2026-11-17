@@ -1,0 +1,15 @@
+# Dashboards chargés depuis le dépôt (infra/grafana/dashboards/*.json, générés par `make dashboards`).
+# On peut les modifier dans Grafana pour essayer, pas les enregistrer : la source de vérité est le code (dashboards.py).
+apiVersion: 1
+
+providers:
+  - name: tennis-mlops
+    folder: Tennis MLOps
+    folderUid: tennis-mlops
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

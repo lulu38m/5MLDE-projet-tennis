@@ -45,7 +45,7 @@ demo:
 
 orchestration:
   simulation_days_per_run: 7     # `make demo` : chaque exécution avance l'horloge d'une semaine simulée…
-  simulation_interval_s: 120     # …toutes les 2 minutes réelles
+  simulation_interval_s: 60      # …toutes les minutes réelles (un pas en retard est sauté, jamais empilé)
   training_trigger_matches: 200  # réentraînement demandé (événement Prefect) dès 200 nouveaux matchs validés
   # Événements envoyés sur Teams (si TENNIS_TEAMS_WEBHOOK_URL est défini) : echec, quarantaine, degrade,
   # rollback, promotion. Une version refusée par la règle de mise en service n'est jamais envoyée (décision normale).
@@ -58,3 +58,5 @@ api:
   max_batch: 200                 # matchs au plus par POST /predict/batch
   write_queue: 10000             # traces en attente d'écriture ; au-delà, elles sont perdues et comptées
   write_flush_s: 0.5             # les traces partent en base par paquets, sans faire attendre la réponse
+  drift_window: 500              # dérive : les 500 dernières prédictions…
+  drift_reference_days: 730      # …contre les deux années d'entraînement du modèle servi (PSI par feature)

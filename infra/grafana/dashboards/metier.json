@@ -1,0 +1,1305 @@
+{
+  "uid": "tennis-metier",
+  "title": "Tennis · Métier",
+  "description": "Temps simulé (l'axe est la date des matchs) : prédictions du scoring faites avant chaque match, jugées sur le résultat validé ; calibration, surprises, couverture, dérive des entrées.",
+  "tags": [
+    "tennis-mlops"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "2015-01-01T00:00:00.000Z",
+    "to": "2026-06-01T00:00:00.000Z"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Dashboards tennis-mlops",
+      "type": "dashboards",
+      "tags": [
+        "tennis-mlops"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "Incidents",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT COALESCE(e.simulated_date, (SELECT MAX(i.simulated_date) FROM pipeline_events i WHERE i.simulated_date IS NOT NULL AND i.occurred_at <= e.occurred_at))::timestamp AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'failure' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Dégradations",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "orange",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT COALESCE(e.simulated_date, (SELECT MAX(i.simulated_date) FROM pipeline_events i WHERE i.simulated_date IS NOT NULL AND i.occurred_at <= e.occurred_at))::timestamp AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'warning' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Mises en service",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "green",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT COALESCE(e.simulated_date, (SELECT MAX(i.simulated_date) FROM pipeline_events i WHERE i.simulated_date IS NOT NULL AND i.occurred_at <= e.occurred_at))::timestamp AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'success' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      },
+      {
+        "name": "Autres événements",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tennis-pg"
+        },
+        "enable": true,
+        "iconColor": "blue",
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT time, text, tags FROM ( SELECT COALESCE(e.simulated_date, (SELECT MAX(i.simulated_date) FROM pipeline_events i WHERE i.simulated_date IS NOT NULL AND i.occurred_at <= e.occurred_at))::timestamp AS time, e.title || COALESCE(' — ' || NULLIF(LEFT(e.detail, 300), ''), '') AS text, e.kind AS tags FROM pipeline_events e WHERE e.severity = 'info' AND e.kind NOT IN ('ingestion_completed', 'alert') ) a WHERE time IS NOT NULL AND $__timeFilter(time) ORDER BY time",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Qualité en ligne sur la période affichée",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Accuracy",
+      "description": "Le favori du modèle a gagné",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT AVG(CASE WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS accuracy FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 0.6,
+                "color": "orange"
+              },
+              {
+                "value": 0.65,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Log loss",
+      "description": "Plus bas = meilleur ; 0,693 = pile ou face",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT AVG(-LN(GREATEST(CASE WHEN f.winner_id = p.p1_id THEN p.p1_win_probability ELSE 1 - p.p1_win_probability END, 1e-15))) AS \"log loss\" FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.62,
+                "color": "orange"
+              },
+              {
+                "value": 0.66,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Brier",
+      "description": "Erreur quadratique sur la probabilité ; 0,25 = pile ou face",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT AVG(POWER(1 - CASE WHEN f.winner_id = p.p1_id THEN p.p1_win_probability ELSE 1 - p.p1_win_probability END, 2)) AS brier FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.22,
+                "color": "orange"
+              },
+              {
+                "value": 0.24,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "Matchs jugés",
+      "description": "Prédits avant le match, résultat validé",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT COUNT(*) AS jugés FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5
+    },
+    {
+      "type": "stat",
+      "title": "Couverture du feedback",
+      "description": "Prédictions dont le résultat est arrivé, parmi celles dont la date est passée",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT AVG(CASE WHEN f.match_id IS NULL THEN 0.0 ELSE 1 END) AS couverture FROM predictions p LEFT JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) AND p.match_date <= (SELECT MAX(match_date) FROM matches)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 0.8,
+                "color": "orange"
+              },
+              {
+                "value": 0.95,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6
+    },
+    {
+      "type": "stat",
+      "title": "Favoris à 70 % battus",
+      "description": "Un modèle calibré en perd moins de 30 %",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT AVG(CASE WHEN f.winner_id <> p.predicted_winner_id THEN 1.0 ELSE 0 END) AS surprises FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) AND GREATEST(p.p1_win_probability, 1 - p.p1_win_probability) >= 0.7",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.25,
+                "color": "orange"
+              },
+              {
+                "value": 0.3,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7
+    },
+    {
+      "type": "timeseries",
+      "title": "Accuracy et log loss par semaine",
+      "description": "Une valeur par semaine de matchs ; les annotations marquent mises en service et incidents",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT date_trunc('week', p.match_date)::timestamp AS time, AVG(CASE WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS accuracy, AVG(-LN(GREATEST(CASE WHEN f.winner_id = p.p1_id THEN p.p1_win_probability ELSE 1 - p.p1_win_probability END, 1e-15))) AS \"log loss\" FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accuracy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "log loss"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8
+    },
+    {
+      "type": "timeseries",
+      "title": "Brier par semaine",
+      "description": "0,25 = pile ou face",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT date_trunc('week', p.match_date)::timestamp AS time, AVG(POWER(1 - CASE WHEN f.winner_id = p.p1_id THEN p.p1_win_probability ELSE 1 - p.p1_win_probability END, 2)) AS brier FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "id": 9
+    },
+    {
+      "type": "row",
+      "title": "Calibration et surprises",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 10
+    },
+    {
+      "type": "barchart",
+      "title": "Calibration du favori",
+      "description": "Probabilité annoncée pour le favori et part de victoires réelle, par tranche : un modèle bien calibré a ses deux barres à la même hauteur",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT LPAD((FLOOR(GREATEST(p.p1_win_probability, 1 - p.p1_win_probability) * 10) * 10)::int::text, 2, '0') || '-' || (FLOOR(GREATEST(p.p1_win_probability, 1 - p.p1_win_probability) * 10) * 10 + 10)::int::text || ' %' AS tranche, AVG(GREATEST(p.p1_win_probability, 1 - p.p1_win_probability)) AS annoncée, AVG(CASE WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS réelle, COUNT(*) AS matchs FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "matchs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "tranche",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 15
+      },
+      "id": 11
+    },
+    {
+      "type": "timeseries",
+      "title": "Favoris battus par mois",
+      "description": "Part des matchs où le modèle s'est trompé de vainqueur",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT date_trunc('month', p.match_date)::timestamp AS time, AVG(CASE WHEN f.winner_id <> p.predicted_winner_id THEN 1.0 ELSE 0 END) AS \"favori battu\" FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 15
+      },
+      "id": 12
+    },
+    {
+      "type": "row",
+      "title": "Ce qu'on prédit",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Prédits et jugés par semaine",
+      "description": "L'écart : matchs prédits dont le résultat n'est pas (encore) validé",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT date_trunc('week', p.match_date)::timestamp AS time, COUNT(*) AS prédits, COUNT(f.match_id) AS \"avec résultat\" FROM predictions p LEFT JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avec résultat"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "prédits"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 14
+    },
+    {
+      "type": "piechart",
+      "title": "Par surface",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT COALESCE(p.surface, 'inconnue') AS surface, COUNT(*) AS prédictions FROM predictions p WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ],
+          "showLegend": true
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 25
+      },
+      "id": 15
+    },
+    {
+      "type": "piechart",
+      "title": "Par niveau de tournoi",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT CASE p.tourney_level WHEN 'G' THEN 'Grand Chelem' WHEN 'M' THEN 'Masters 1000' WHEN 'A' THEN 'ATP 250 / 500' WHEN 'F' THEN 'Masters de fin d''année' WHEN 'D' THEN 'Coupe Davis' WHEN 'O' THEN 'Jeux olympiques' ELSE 'autre' END AS niveau, COUNT(*) AS prédictions FROM predictions p WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ],
+          "showLegend": true
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 25
+      },
+      "id": 16
+    },
+    {
+      "type": "barchart",
+      "title": "Qualité par surface",
+      "description": "Accuracy et log loss des prédictions jugées, sur la période affichée",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT COALESCE(p.surface, 'inconnue') AS surface, AVG(CASE WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS accuracy, AVG(-LN(GREATEST(CASE WHEN f.winner_id = p.p1_id THEN p.p1_win_probability ELSE 1 - p.p1_win_probability END, 1e-15))) AS \"log loss\" FROM predictions p JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accuracy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "log loss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "surface",
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 17
+    },
+    {
+      "type": "table",
+      "title": "Tournois les plus prédits",
+      "description": "Prédits avant le match, et combien sont déjà jugés (un tournoi en cours n'a pas encore de résultat)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tennis-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tennis-pg"
+          },
+          "rawSql": "SELECT COALESCE(p.tourney_name, split_part(p.match_id, '-', 1) || '-' || split_part(p.match_id, '-', 2)) AS tournoi, MIN(p.match_date) AS début, COUNT(*) AS prédits, COUNT(f.match_id) AS jugés, AVG(CASE WHEN f.winner_id IS NULL THEN NULL WHEN f.winner_id = p.predicted_winner_id THEN 1.0 ELSE 0 END) AS accuracy FROM predictions p LEFT JOIN feedbacks f ON f.match_id = p.match_id WHERE p.client = 'scoring' AND $__timeFilter(p.match_date::timestamp) GROUP BY 1 ORDER BY 3 DESC, 2 DESC LIMIT 15",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accuracy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 18
+    },
+    {
+      "type": "row",
+      "title": "Dérive des entrées (temps réel : les 500 dernières prédictions contre l'entraînement du modèle servi)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 19
+    },
+    {
+      "type": "bargauge",
+      "title": "PSI par feature",
+      "description": "Moins de 0,1 : stable. De 0,1 à 0,2 : à surveiller. Au-delà : le modèle extrapole.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "tennis_api_feature_drift_psi{job=\"api\"}",
+          "legendFormat": "{{feature}}",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.1,
+                "color": "orange"
+              },
+              {
+                "value": 0.2,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "max": 0.5
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left"
+      },
+      "timeFrom": "now-15m",
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 42
+      },
+      "id": 20
+    },
+    {
+      "type": "text",
+      "title": "Lire la dérive",
+      "options": {
+        "mode": "markdown",
+        "content": "Le **PSI** compare la distribution de chaque feature sur les 500 dernières prédictions servies à celle des deux\nannées d'entraînement du modèle en production (jusqu'à son tag `data_window_end`).\n\nOn compare l'**écart** entre les deux joueurs, en valeur absolue : l'ordre joueur 1 / joueur 2 n'est pas le même à\nl'entraînement et dans un tableau.\n\nLe panneau est en temps réel (dernier quart d'heure), quel que soit l'intervalle simulé choisi en haut.\n"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "id": 21
+    }
+  ]
+}

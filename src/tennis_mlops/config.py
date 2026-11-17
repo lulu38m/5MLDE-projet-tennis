@@ -54,7 +54,11 @@ class Settings(BaseSettings):
     admin_token: SecretStr | None = Field(default=None, description="Si défini, exigé par POST /admin/reload")
     # Phase 8 : liens de l'interface de test, ouverts par le navigateur (adresses publiées sur l'hôte).
     api_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:8000")
-    grafana_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:3000")
+    grafana_ui_url: HttpUrl = HttpUrl("http://127.0.0.1:3001")
+    # Phase 9 : Prometheus et le compte admin de Grafana (le même mot de passe est donné à Grafana par compose), pour
+    # `make grafana-check` depuis la machine hôte.
+    prometheus_url: HttpUrl = HttpUrl("http://127.0.0.1:9091")
+    grafana_admin_password: SecretStr = SecretStr("admin-local")
 
     def alert_origin(self) -> str:
         """Le poste qui envoie : `TENNIS_ALERT_HOST` (le Makefile y met le nom du Mac), sinon le nom de la machine."""
@@ -220,6 +224,8 @@ class ApiConfig(_StrictModel):
     max_batch: int = Field(default=200, ge=1, le=1000, description="Matchs au plus par POST /predict/batch")
     write_queue: int = Field(default=10_000, ge=100, description="Lignes en attente d'écriture avant d'en perdre")
     write_flush_s: float = Field(default=0.5, gt=0, le=10, description="Écriture en base par paquets, toutes les N s")
+    drift_window: int = Field(default=500, ge=50, description="Dernières prédictions comparées à l'entraînement")
+    drift_reference_days: int = Field(default=730, ge=90, description="Période d'entraînement de référence (jours)")
 
 
 class DemoConfig(_StrictModel):

@@ -1,0 +1,33 @@
+# Sources de données de Grafana, créées au démarrage (phase 9). Les uid sont ceux des dashboards
+# (src/tennis_mlops/monitoring/dashboards.py) : ne pas les changer sans régénérer les JSON.
+apiVersion: 1
+
+prune: true
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  # Base du projet, compte en lecture seule (droits posés par postgres-setup, voir compose.yml).
+  - name: Tennis (PostgreSQL)
+    uid: tennis-pg
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: grafana_reader
+    editable: false
+    jsonData:
+      database: tennis
+      sslmode: disable
+      postgresVersion: 1800
+      timescaledb: false
+      maxOpenConns: 5
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}

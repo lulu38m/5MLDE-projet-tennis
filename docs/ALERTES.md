@@ -64,7 +64,7 @@ registre (rollback, promotion)                 ─► POST /registry ─┼─�
   le service relit le flow run dans l'API Prefect, les lots refusés dans `pipeline_events`, la campagne dans
   MLflow (tag `prefect.flow_run_id`), la version servie et l'état des données dans la base.
 - **Un événement n'est traité qu'une fois** (identifiant de l'événement Prefect, ou de la décision du registre).
-- **Pas de rafale** : la simulation repasse toutes les 2 minutes. Un incident qui persiste (le même lot refusé à
+- **Pas de rafale** : la simulation repasse chaque minute. Un incident qui persiste (le même lot refusé à
   chaque pas, la source toujours en panne) ne renvoie une carte qu'après `alert_cooldown_min` (30 min) ; entre-temps
   l'alerte est gardée avec le statut « répétée ».
 - **Jamais bloquant** : une lecture qui échoue (MLflow arrêté, base injoignable) donne une carte moins riche, pas

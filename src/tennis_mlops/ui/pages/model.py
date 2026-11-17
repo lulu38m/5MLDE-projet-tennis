@@ -54,7 +54,7 @@ st.markdown("#### Liens")
 st.markdown(
     f"- [MLflow : le registre `atp-winner`]({settings.mlflow_ui_url}#/models/atp-winner)\n"
     f"- [Prefect : les runs de la simulation]({settings.prefect_ui_url}runs)\n"
-    f"- [Grafana : les dashboards]({settings.grafana_ui_url}) (phase 10)\n"
+    f"- [Grafana : dashboards technique, métier et croisé]({settings.grafana_ui_url}dashboards/f/tennis-mlops)\n"
     f"- [API : documentation interactive]({settings.api_ui_url}docs)"
 )
 st.caption(f"Registre relu le {registry.get('last_success') or '—'} · {registry.get('reloads', 0)} rechargement(s)")

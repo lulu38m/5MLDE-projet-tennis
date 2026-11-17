@@ -1,0 +1,23 @@
+# Prometheus de la stack (phase 9). Adresses du réseau interne de compose.
+# Rétention et options de démarrage : service `prometheus` de compose.yml.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # API de prédiction : trafic, latences, erreurs, version servie, dérive des entrées.
+  - job_name: api
+    static_configs:
+      - targets: ["api:8000"]
+
+  # Exporteur de la chaîne : santé des services, horloge simulée, mode d'incident de la source, flows Prefect,
+  # CPU et mémoire de chaque conteneur du projet (API Docker).
+  - job_name: exporter
+    scrape_timeout: 14s  # sondes (3 s) puis Prefect (3 appels de 3 s au plus)
+    static_configs:
+      - targets: ["exporter:9101"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]

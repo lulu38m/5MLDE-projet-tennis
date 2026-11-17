@@ -130,7 +130,7 @@ L'expérience MLflow **`atp-winner-decisions`** contient un run par décision : 
 `decided_by`, `reason`, `decided_at`, `campaign_run_id` ; artefacts `decision/event.json` et `decision/rules.csv`.
 Le registre donne l'**état** ; le journal donne l'**historique**, dans l'ordre. Chaque décision est aussi inscrite
 dans la table `pipeline_events` de la base du projet ([`ORCHESTRATION.md`](ORCHESTRATION.md)), d'où les annotations
-Grafana la reprendront.
+Grafana la reprennent ([`MONITORING.md`](MONITORING.md)).
 
 ## La chaîne de traçabilité
 

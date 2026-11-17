@@ -71,6 +71,7 @@ predictions = sa.Table(
     sa.Column("round", sa.String(8)),
     sa.Column("best_of", sa.Integer()),
     sa.Column("tourney_name", sa.String(120)),  # phase 8 : ajoutée à une table existante par `create_schema`
+    sa.Column("model_data_end", sa.Date()),  # phase 9 : fin des données d'entraînement de la version (âge du modèle)
     sa.Column("p1_id", sa.Integer(), nullable=False),
     sa.Column("p2_id", sa.Integer(), nullable=False),
     sa.Column("p1_name", sa.String(120)),
@@ -113,7 +114,7 @@ feedbacks = sa.Table(
 )
 
 TABLES = {"api_requests": api_requests, "predictions": predictions, "errors": errors}
-ADDED_COLUMNS = (predictions.c.tourney_name,)
+ADDED_COLUMNS = (predictions.c.tourney_name, predictions.c.model_data_end)
 FIXTURE_COLUMNS = ("match_id", "match_date", "tourney_name", "tourney_level", "surface", "round", "p1_id", "p2_id",
                    "p1_name", "p2_name", "p1_win_probability", "predicted_winner_id", "model_version", "created_at",
                    "client")  # fmt: skip

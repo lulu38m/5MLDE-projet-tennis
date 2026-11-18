@@ -195,6 +195,26 @@ def test_too_little_data_fails_and_closes_the_campaign_run(world: TrainWorld) ->
     assert world.runs("candidate") == []
 
 
+class QuarantinedSource(FrameSource):
+    """Deux lots refusés par Great Expectations, pas encore réingérés."""
+
+    def lots_summary(self) -> dict[str, object]:
+        return {**super().lots_summary(), "lots_quarantined": 2, "quarantined_lots": ["2016-0301", "2016-0302"]}
+
+
+def test_training_is_interrupted_while_lots_stay_in_quarantine(
+    world: TrainWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = QuarantinedSource(world.source.frame)
+    monkeypatch.setattr(train, "dependency_factory", lambda *_: TrainingDependencies(source, world.tracker))
+    state, _ = campaign(world)
+    assert state.is_failed()
+    reason = str(state.result(raise_on_failure=False))
+    assert "entraînement interrompu : 2 lot(s) en quarantaine non résolu(s) (2016-0301, 2016-0302)" in reason
+    assert world.runs("campaign") == [] and world.runs("candidate") == []  # rien n'est parti : ni run, ni version
+    assert world.registry.client.search_registered_models() == []
+
+
 def test_command_line_exit_codes(world: TrainWorld) -> None:
     assert train.main(["--config", world.config(), "--workers", "1"]) == train.EXIT_OK
     bad = small_config(split=SplitConfig(train_start=small_config().split.train_start, validation_months=6,

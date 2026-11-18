@@ -274,9 +274,14 @@ class IngestionStore:
                 .limit(1)
             ).one_or_none()
             watermark = conn.execute(sa.select(state.c.value).where(state.c.key == WATERMARK_KEY)).scalar_one_or_none()
+            refused = conn.execute(
+                sa.select(lots.c.lot_id).where(lots.c.status == LotStatus.QUARANTINED).order_by(lots.c.lot_id).limit(10)
+            ).scalars()
+            quarantined_ids = [str(lot_id) for lot_id in refused]
         return {
             "lots_valid": int(counts.get(LotStatus.VALID, 0)),
             "lots_quarantined": int(counts.get(LotStatus.QUARANTINED, 0)),
+            "quarantined_lots": quarantined_ids,
             "last_valid_lot": last.lot_id if last else None,
             "last_valid_lot_end": last.end_date.isoformat() if last and last.end_date else None,
             "last_valid_lot_docs": last.docs_index if last else None,

@@ -87,11 +87,11 @@ def test_reset_removes_volumes_and_local_state_but_keeps_downloaded_data(project
 def test_commands_forward_to_the_project_modules(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     run = Recorder()
     cli = Cli(project, run, print)
-    assert main(["scenarios", "--only", "S2,S5", "--teams"], cli) == 0
+    assert main(["scenarios", "--only", "S2,S5", "--silence"], cli) == 0
     assert main(["urls"], cli) == 0 and main(["demo"], cli) == 0 and main(["demo-stop"], cli) == 0
     assert main(["down"], cli) == 0
     assert [line for line in run.lines() if not line.startswith("git")] == [
-        "python -m tennis_mlops.acceptance run --only S2,S5 --teams",
+        "python -m tennis_mlops.acceptance run --only S2,S5 --silence",
         "python -m tennis_mlops.acceptance urls",
         "python -m tennis_mlops.orchestration start",
         "python -m tennis_mlops.orchestration stop",

@@ -77,6 +77,10 @@ class Actions(Protocol):
         """`make simulate DAYS=…`."""
         ...
 
+    def train(self) -> FlowOutcome:
+        """`make train` : une campagne lancée à la main."""
+        ...
+
     def train_weak(self) -> int:
         """`make train-weak` ; code de sortie."""
         ...
@@ -107,6 +111,13 @@ class LocalActions:
         from tennis_mlops.flows.simulation import simulation_flow
 
         return _outcome(simulation_flow(days, return_state=True))
+
+    def train(self) -> FlowOutcome:
+        """Une campagne avec la configuration normale, suivie dans Prefect."""
+        from tennis_mlops.flows.train import training_flow
+
+        with _quiet():
+            return _outcome(training_flow(return_state=True))
 
     def train_weak(self) -> int:
         """La campagne volontairement mauvaise."""
@@ -191,6 +202,21 @@ def settle(stack: Stack, since: datetime, timeout_s: float = TRAINING_TIMEOUT_S)
         return None if any(not r.final for r in runs) else runs
 
     return wait_for(probe, timeout_s, "fin des entraînements en cours", interval_s=5)
+
+
+def _training_refused(ctx: Context) -> None:
+    """Pendant la quarantaine, une campagne lancée à la main (`make train`) est interrompue avant d'entraîner."""
+    latest = ctx.stack.latest_version()
+    ctx.rec.step("entraînement lancé à la main pendant la quarantaine (make train)")
+    training = ctx.actions.train()
+    reason = str(training.result or "")
+    ctx.rec.expect(training.failed and "quarantaine" in reason,
+                   f"{training.state_name} : « {reason} »",
+                   f"entraînement non interrompu : {training.state_name} {reason}")  # fmt: skip
+    if training.flow_run_id:
+        ctx.rec.link("Prefect : entraînement interrompu", ctx.stack.prefect_run_url(training.flow_run_id))
+    ctx.rec.expect(ctx.stack.latest_version() == latest, f"aucune nouvelle version enregistrée (dernière : v{latest})")
+    _alert(ctx, "echec", flow_run_id=training.flow_run_id)
 
 
 def _quarantined(ctx: Context, since: datetime, flow_run_id: str | None) -> list[dict[str, Any]]:
@@ -336,7 +362,8 @@ class S2Corrupt(Scenario):
 
     id = "S2"
     title = "Lot corrompu (corrupt)"
-    expected = "expectation custom en échec, lot en quarantaine, aucun entraînement, alerte reçue par alert_sink"
+    expected = ("expectation custom en échec, lot en quarantaine, aucun entraînement (un entraînement lancé à la main "
+                "est interrompu), alerte reçue par alert_sink")  # fmt: skip
 
     def run(self, ctx: Context) -> None:
         """Une semaine ingérée pendant que la source corrompt ses réponses."""
@@ -359,6 +386,7 @@ class S2Corrupt(Scenario):
                    "aucun entraînement demandé ni lancé",
                    f"entraînement lancé : {[r.name for r in trainings]}")  # fmt: skip
         _alert(ctx, "quarantaine", flow_run_id=outcome.flow_run_id)
+        _training_refused(ctx)
         rec.expect(stack.alias(Alias.PRODUCTION) == production, f"production inchangée (v{production})")
         _recover(ctx, lots)
 

@@ -12,6 +12,7 @@ import httpx
 from tennis_mlops.acceptance.scenarios import FlowOutcome
 from tennis_mlops.acceptance.stack import RunInfo, Stack, TaskInfo, now
 from tennis_mlops.config import Settings
+from tennis_mlops.data.errors import DataQualityError
 from tennis_mlops.orchestration.clock import ClockStep
 from tennis_mlops.registry.tagging import Alias
 
@@ -183,6 +184,7 @@ class FakeActions:
     on_ingest: Any = None  # effet de bord d'une ingestion (ex. événements)
     on_simulate: Any = None  # effet de bord d'un pas de simulation (entraînement déclenché…)
     train_code: int = 0
+    quarantine_blocks: bool = True  # l'entraînement refuse de partir pendant une quarantaine
     rollback_code: int = 0
     smoke: list[str] = field(default_factory=lambda: ["interface en ligne", "prédiction affichée", "tracée"])
     calls: list[str] = field(default_factory=list)
@@ -198,6 +200,16 @@ class FakeActions:
         if self.on_simulate:
             self.on_simulate(self, days)
         return self.simulations.pop(0)
+
+    def train(self) -> FlowOutcome:
+        self.calls.append("train")
+        if self.quarantine_blocks:
+            self.stack.alert_list.insert(0, {"kind": "echec", "title": "carte echec", "delivery": "silenced",
+                                             "at": now().isoformat(), "flow_run_id": "train-1"})  # fmt: skip
+            reason = "entraînement interrompu : 1 lot(s) en quarantaine non résolu(s) (2015-0400)"
+            return FlowOutcome("train-1", "Failed", True, DataQualityError(reason))
+        self.stack.tags[str(int(self.stack.latest_version() or "0") + 1)] = {"gate_status": "passed"}
+        return FlowOutcome("train-1", "Completed", False)
 
     def train_weak(self) -> int:
         self.calls.append("train-weak")

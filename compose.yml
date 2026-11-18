@@ -159,6 +159,10 @@ services:
       - --artifacts-destination=/var/lib/mlflow/artifacts
       # Protection contre le DNS rebinding : seuls ces en-têtes Host sont acceptés (navigateur et autres conteneurs).
       - --allowed-hosts=localhost:*,127.0.0.1:*,mlflow:*
+    environment:
+      # MLflow 3.16 lance sinon un « job runner » (scoring GenAI, archivage de traces, inutiles ici) : 7 processus
+      # d'environ 240 Mo, au-delà de la limite de 1 Go → workers tués en boucle, serveur injoignable.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     volumes:
       - mlflow_artifacts:/var/lib/mlflow
     depends_on:

@@ -49,7 +49,7 @@ def campaign(stack: FakeStack, **kwargs: object) -> tuple[Campaign, list[str], F
 
 def test_every_scenario_is_played_and_the_stack_is_put_back_in_order() -> None:
     stack = FakeStack(teams=True)
-    c, log, services = campaign(stack)
+    c, log, services = campaign(stack, teams=False)
     result = c.run()
     assert [s.status for s in result.scenarios] == [Status.PASSED, Status.FAILED, Status.ERROR, Status.ERROR]
     assert result.scenarios[1].steps[-1].text == "alerte absente"
@@ -63,12 +63,12 @@ def test_every_scenario_is_played_and_the_stack_is_put_back_in_order() -> None:
 
 def test_only_and_teams() -> None:
     stack = FakeStack(paused=False)
-    c, _, _ = campaign(stack, only=frozenset({"S1"}), teams=True)
+    c, _, _ = campaign(stack, only=frozenset({"S1"}))  # par défaut : les cartes partent
     result = c.run()
     assert [s.status for s in result.scenarios] == [Status.PASSED, Status.SKIPPED, Status.SKIPPED, Status.SKIPPED]
     assert result.passed and "silence" not in stack.calls and "unsilence" not in stack.calls
     assert stack.paused and any("simulation planifiée mise en pause" in n for n in result.notes)
-    assert any("TEAMS=1" in n for n in result.notes)
+    assert any("cartes Teams envoyées" in n for n in result.notes)
 
 
 def test_a_stack_that_is_down_or_already_used_is_refused_with_the_command_to_run() -> None:

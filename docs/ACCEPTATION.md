@@ -34,7 +34,7 @@ Idempotent : relancé sur une stack qui a déjà un modèle en production, il v�
 | # | Scénario | Ce qui est fait | Vérifié automatiquement |
 |---|---|---|---|
 | S1 | Nominal | 2 pas de simulation : 1er janvier → 3 juin 2016, puis une semaine | lots validés par GX → réentraînement demandé → campagne sur le worker → nouvelle version, règle passée → alias `production` déplacé (`previous` = l'ancienne) → l'API sert la nouvelle version sans redémarrage → matchs à venir prédits → feedbacks enregistrés |
-| S2 | Lot corrompu | `corrupt` pendant une semaine d'ingestion | ingestion en échec, lots en quarantaine, au moins une **expectation custom** en échec, aucun match stocké, aucun entraînement, alerte « quarantaine » reçue par `alert_sink`, production inchangée ; puis reprise : les mêmes lots passent |
+| S2 | Lot corrompu | `corrupt` pendant une semaine d'ingestion | ingestion en échec, lots en quarantaine, au moins une **expectation custom** en échec, aucun match stocké, aucun entraînement ; un entraînement lancé à la main pendant la quarantaine est **interrompu** (flow `Failed`, aucune version, alerte « échec ») ; alerte « quarantaine » reçue par `alert_sink`, production inchangée ; puis reprise : les mêmes lots passent |
 | S3 | Source en 503 / lente | `503` ×2, `slow` ×1, puis `503` sans fin | retries visibles dans Prefect (task jouée 3 fois, puis 2 fois), succès final ; après épuisement (4 essais) état « Dégradé » et alerte |
 | S4 | Source arrêtée | `docker compose stop mock_source` | ingestion « Dégradé », watermark inchangé, incident dans `pipeline_events`, alerte ; l'API sert toujours le dernier état validé ; source relancée, horloge remise à l'heure |
 | S5 | Schéma modifié | `schema` pendant une semaine | contrôle de schéma (`expect_column_to_exist`) en échec, quarantaine, rien de stocké, alerte ; puis reprise |
@@ -47,7 +47,7 @@ Chaque vérification est une ligne ✅ ou ❌ dans le terminal et dans le rappor
 
 ```sh
 uv run tennis scenarios --only S2,S5   # quelques scénarios seulement      (make scenarios ONLY=S2,S5)
-uv run tennis scenarios --teams        # laisser partir les cartes Teams    (make scenarios TEAMS=1)
+uv run tennis scenarios --silence      # aucune carte Teams                 (make scenarios SILENCE=1)
 uv run tennis report                   # state/acceptance/rapport.html     (make scenarios-report)
 ```
 
@@ -74,9 +74,13 @@ nouvelle version reste légèrement moins bonne que v1 (log loss + 0,002 environ
 
 ### Ce que `make scenarios` touche, et remet en ordre
 
-- **Pas de carte Teams** : le service d'alertes passe en **mode silence** le temps des tests (`POST /silence`) ; les
-  alertes sont reçues et gardées dans l'historique avec le statut `silenced`, rien n'est envoyé. Le silence est levé
-  à la fin, et s'arrête de lui-même au bout de 90 min si la campagne est interrompue.
+- **Cartes Teams** : les incidents provoqués envoient leur carte, comme en vrai (webhook de `.env`). Une campagne
+  complète en poste cinq : « Lot refusé » et « Échec de l'entraînement » (S2), « Dégradé » (S3), « Lot refusé »
+  (S5), « Rollback » (S7). S4 refait une panne « Dégradé » : même incident, carte gardée (`repeated`, une carte par
+  demi-heure au plus). Sans webhook, les alertes restent dans l'historique (`make alerts`).
+- **`--silence`** (`SILENCE=1`) : le service d'alertes passe en **mode silence** le temps des tests (`POST /silence`) ;
+  les alertes sont reçues et gardées avec le statut `silenced`, rien n'est envoyé. Le silence est levé à la fin, et
+  s'arrête de lui-même au bout de 90 min si la campagne est interrompue.
 - La simulation planifiée est mise en pause (`make demo` pour la relancer).
 - Entre deux scénarios : incident de la source arrêté, services relancés s'ils ont été arrêtés, entraînements
   déclenchés par l'ingestion menés à leur terme. Un scénario raté n'empêche pas les suivants.

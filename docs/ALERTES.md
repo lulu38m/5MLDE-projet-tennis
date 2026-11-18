@@ -71,10 +71,10 @@ registre (rollback, promotion)                 ─► POST /registry ─┼─�
   d'erreur. Côté registre et entraînement, un service d'alertes injoignable est signalé en une ligne ; la décision,
   elle, est déjà appliquée.
 
-- **Mode silence** (phase 11) : pendant `make scenarios`, le service ne poste rien sur Teams (le canal est partagé
-  avec la classe) ; chaque alerte est construite et gardée avec le statut « en silence ». `POST /silence`
+- **Mode silence** (phase 11) : avec `make scenarios SILENCE=1` (`uv run tennis scenarios --silence`), le service ne
+  poste rien sur Teams pendant les tests ; sans cette option, les cartes partent ; chaque alerte est construite et gardée avec le statut « en silence ». `POST /silence`
   (`{"minutes": 90, "reason": "…"}`) le pose, `DELETE /silence` le lève ; il s'arrête seul à l'heure dite.
-  `make scenarios TEAMS=1` laisse partir les cartes.
+  Le dédoublonnage reste actif : un même incident rejoué dans la demi-heure ne renvoie pas de carte.
 
 API (`http://127.0.0.1:8090/docs`) : `POST /prefect`, `POST /registry`, `GET /alerts?limit=20`, `GET /health`,
 `POST /silence`, `DELETE /silence`.

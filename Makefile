@@ -270,8 +270,8 @@ ONLY ?=
 TEAMS ?=
 FORCE ?=
 
-scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~10 min) ; `ONLY=S2,S5`, `TEAMS=1`, rapport HTML
-	$(UV) tennis scenarios $(if $(ONLY),--only $(ONLY)) $(if $(TEAMS),--teams) $(if $(FORCE),--force)
+scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~10 min) ; `ONLY=S2,S5`, `SILENCE=1`, rapport HTML
+	$(UV) tennis scenarios $(if $(ONLY),--only $(ONLY)) $(if $(SILENCE),--silence) $(if $(FORCE),--force)
 
 scenarios-report: ## Ouvre le rapport du dernier `make scenarios`
 	$(UV) tennis report

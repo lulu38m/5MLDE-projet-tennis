@@ -4,6 +4,46 @@ Chaîne MLOps complète qui prédit la probabilité de victoire d'un joueur dans
 sont rejoués dans le temps par une API simulée, ce qui permet de démontrer l'ingestion continue, les contrôles
 qualité, le réentraînement, la mise en service et la supervision.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    classDef ext fill:#eef2f7,stroke:#8a96a8,color:#1d2330
+    classDef store fill:#fff6e5,stroke:#c9a14a,color:#1d2330
+
+    UI["Interface Streamlit :8501"] -- "X-Client: ui" --> API
+    subgraph ORCH["Orchestration"]
+        direction LR
+        PREFECT["Prefect :4201<br/>planning · automations"] -- runs --> WORKER["worker<br/>simulation · ingestion · entraînement"]
+        PREFECT -- "échec, dégradé" --> SINK["alert_sink :8090"]
+    end
+    MOCK["mock_source :8001<br/>rejeu ATP, horloge simulée"]
+    API["API FastAPI :8000<br/>sert l'alias production"]
+    MLFLOW["MLflow :7282<br/>runs · registre"]
+    PG[("PostgreSQL :5433<br/>tennis · prefect · mlflow")]:::store
+    TEAMS["Teams"]:::ext
+
+    WORKER -- "horloge, tournois" --> MOCK
+    WORKER -- "matchs validés, journal" --> PG
+    WORKER -- "campagnes, versions" --> MLFLOW
+    WORKER -- "scoring, feedback" --> API
+    API -- "relit l'alias" --> MLFLOW
+    API -- "historique, traces" --> PG
+    SINK --> TEAMS
+
+    subgraph OBS["Supervision"]
+        direction LR
+        GRAF["Grafana :3001"] --> PROM["Prometheus :9091"] --> EXP["exporteur<br/>santé · runs · conteneurs"]
+    end
+    PROM -- "/metrics" --> API
+    GRAF -- "lecture seule" --> PG
+```
+
+Une source simulée rejoue les matchs ATP 2010 → 2026 dans le temps ; Prefect enchaîne ingestion contrôlée par Great
+Expectations, entraînement déclenché par événement et mise en service gardée par une règle ; l'API sert la version
+`production` du registre MLflow ; les vrais résultats reviennent juger chaque prédiction ; Prometheus et Grafana
+surveillent le tout. Flux des données, déroulé d'un pas et artefacts : [`docs/architecture.md`](docs/architecture.md).
+
 ## Lancer le projet, de zéro
 
 Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien : **les mêmes commandes sous macOS, Linux et Windows**
@@ -198,7 +238,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md`, `CHARGE.md`, `SYNTHESE_OPS.md` (dimensionnement), `ACCEPTATION.md` (parcours correcteur, S1 → S9) |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md`, `CHARGE.md`, `SYNTHESE_OPS.md` (décisions, preuves, dimensionnement, limites), `ACCEPTATION.md` (parcours correcteur, S1 → S9), `architecture.md` (flux et artefacts), `DEMO.md` (déroulé de la soutenance) |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 

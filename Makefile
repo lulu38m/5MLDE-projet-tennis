@@ -46,7 +46,6 @@ export HOST_UID HOST_GID
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 export GIT_COMMIT
 GX_DOCS := state/gx/gx/uncommitted/data_docs/local_site/index.html
-RESET_DIRS := state/gx state/lots state/quarantine state/alerts state/acceptance
 
 help: ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}'
@@ -89,26 +88,16 @@ data-lock: ## (Mainteneurs) Résout les révisions actuelles des sources et rég
 
 # --------------------------------------------------------------------------- stack Docker
 
-# Créé une seule fois, jamais écrasé : aucun secret n'est nécessaire (sans webhook Teams, les alertes restent dans
-# l'historique de `make alerts`).
-.env:
-	cp .env.example .env
-	@echo ".env créé depuis .env.example (rien à remplir pour la démo)"
-
-up: .env data ## Construit et démarre la stack, puis un premier modèle entraîné par la chaîne et servi par l'API
-	@mkdir -p state  # créé par l'hôte : sinon Docker le crée au nom de root (Linux, WSL2) et l'ingestion ne peut y écrire
-	docker compose up -d --build --wait
-	$(UV) python -m tennis_mlops.acceptance bootstrap
+# Le parcours correcteur est écrit en Python (src/tennis_mlops/cli.py) pour marcher aussi sous Windows sans make :
+# `make up` et `uv run tennis up` font exactement la même chose (.env créé s'il manque, données, stack, 1er modèle).
+up: ## Construit et démarre la stack, puis un premier modèle entraîné par la chaîne et servi par l'API
+	$(UV) tennis up
 
 down: ## Arrête la stack (les volumes sont conservés)
 	docker compose down
 
 reset: ## Remise à zéro : stack arrêtée, volumes supprimés (bases, MLflow, Grafana) et état local effacé ; garde data/raw
-	docker compose down --volumes --remove-orphans
-	@# Fichiers écrits par le worker (utilisateur app de l'image) : sous Linux, seul root peut les effacer.
-	rm -rf $(RESET_DIRS) 2>/dev/null || docker run --rm --user 0 -v "$(CURDIR)/state:/app/state" tennis-mlops:local \
-		rm -rf $(addprefix /app/,$(RESET_DIRS))
-	@echo "stack remise à zéro : make up pour repartir de l'état de référence"
+	$(UV) tennis reset
 
 logs: ## Suit les logs de la stack
 	docker compose logs -f --tail=100
@@ -117,7 +106,7 @@ ps: ## État des services
 	docker compose ps
 
 urls: ## Adresses des interfaces, identifiants de démo, et si elles répondent
-	@$(UV) python -m tennis_mlops.acceptance urls
+	@$(UV) tennis urls
 
 # --------------------------------------------------------------------------- mock_source
 
@@ -180,7 +169,7 @@ alerts: ## Dernières alertes et ce qu'elles sont devenues (envoyée, filtrée, 
 # --------------------------------------------------------------------------- orchestration (phase 6)
 
 demo: up ## Chaîne automatique : +7 jours simulés chaque minute, ingestion, réentraînement sur événement, alertes
-	$(UV) python -m tennis_mlops.orchestration start
+	$(UV) tennis demo
 
 demo-stop: ## Met la simulation planifiée en pause (le run en cours se termine)
 	$(UV) python -m tennis_mlops.orchestration stop
@@ -281,8 +270,8 @@ ONLY ?=
 TEAMS ?=
 FORCE ?=
 
-scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~15 min) ; `ONLY=S2,S5`, rapport HTML
-	$(UV) python -m tennis_mlops.acceptance run $(if $(ONLY),--only $(ONLY)) $(if $(TEAMS),--teams) $(if $(FORCE),--force)
+scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~10 min) ; `ONLY=S2,S5`, `TEAMS=1`, rapport HTML
+	$(UV) tennis scenarios $(if $(ONLY),--only $(ONLY)) $(if $(TEAMS),--teams) $(if $(FORCE),--force)
 
 scenarios-report: ## Ouvre le rapport du dernier `make scenarios`
-	$(UV) python -m webbrowser -t "file://$(CURDIR)/state/acceptance/rapport.html"
+	$(UV) tennis report

@@ -60,7 +60,10 @@ class Campaign:
         stack = self.stack
         down = [name for name in SERVICES if not stack.healthy(name)]
         if down:
-            msg = f"services injoignables : {', '.join(down)} — la stack tourne-t-elle ? (make up, puis make ps)"
+            msg = (
+                f"services injoignables : {', '.join(down)} — la stack tourne-t-elle ? (`uv run tennis up`, puis "
+                "docker compose ps)"
+            )
             raise NotReadyError(msg)
         production, versions = stack.alias(Alias.PRODUCTION), stack.version_count()
         clock, start = stack.clock(), stack.config.simulation.replay_start
@@ -73,10 +76,11 @@ class Campaign:
             problems.append(f"horloge simulée au {clock} (attendu : {start}, début du rejeu)")
         if problems and not self.force:
             msg = ("la stack n'est pas dans l'état laissé par `make up` : " + " ; ".join(problems) + ". Repartir "
-                   "d'une stack neuve : make reset && make up (ou FORCE=1 pour jouer quand même)")  # fmt: skip
+                   "d'une stack neuve : `uv run tennis reset` puis `uv run tennis up` (make reset && make up), ou "
+                   "--force pour jouer quand même")  # fmt: skip
             raise NotReadyError(msg)
         if problems:
-            self.notes.append("joué hors de l'état de référence (FORCE=1) : " + " ; ".join(problems))
+            self.notes.append("joué hors de l'état de référence (--force) : " + " ; ".join(problems))
         self.log(f"état de départ : production v{production}, {versions} version(s), horloge au {clock}")
 
     # ------------------------------------------------------------------ déroulé
@@ -156,7 +160,7 @@ class Campaign:
     def _quiet(self) -> None:
         stack = self.stack
         if stack.pause_simulation():
-            self.notes.append("simulation planifiée mise en pause (make demo pour la relancer)")
+            self.notes.append("simulation planifiée mise en pause (`uv run tennis demo` pour la relancer)")
         teams = bool(stack.alert_health().get("teams"))
         if self.teams:
             self.notes.append("TEAMS=1 : les cartes partent sur Teams" if teams else "aucun webhook Teams configuré")

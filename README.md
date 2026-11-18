@@ -6,35 +6,25 @@ qualité, le réentraînement, la mise en service et la supervision.
 
 ## Lancer le projet, de zéro
 
-Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien. Compter **une demi-heure** en tout, dont l'essentiel
-à attendre. Mêmes commandes sous macOS, Linux et Windows (dans WSL2, voir l'étape 1).
+Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien : **les mêmes commandes sous macOS, Linux et Windows**
+(dans PowerShell, sans WSL ni `make`). Compter une demi-heure en tout, dont l'essentiel à attendre.
 
-### 1. Installer les outils (une seule fois)
+### 1. Installer trois outils (une seule fois)
 
-| Outil | Pourquoi | Installation |
-|---|---|---|
-| **Docker Desktop** | toute la stack tourne dans des conteneurs | [docker.com](https://www.docker.com/products/docker-desktop/), puis Réglages → Resources : **8 Go de mémoire** au moins |
-| **uv** | installe Python 3.12 et les dépendances verrouillées | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| **git**, **make** | récupérer le code, lancer les commandes | macOS : `xcode-select --install` · Linux : `sudo apt install git make` |
+| Outil | Pourquoi | macOS / Linux | Windows |
+|---|---|---|---|
+| **Docker Desktop** | toute la stack tourne dans des conteneurs | [docker.com](https://www.docker.com/products/docker-desktop/) | [docker.com](https://www.docker.com/products/docker-desktop/) (il installe WSL2 lui-même) |
+| **uv** | installe Python 3.12 et les dépendances verrouillées | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| **git** | récupérer le code | macOS : `xcode-select --install` · Linux : `sudo apt install git` | [git-scm.com](https://git-scm.com/download/win) |
 
-**Windows** : tout se fait dans **WSL2**, jamais dans PowerShell ni dans `C:\` :
-
-1. PowerShell en administrateur : `wsl --install -d Ubuntu`, redémarrer, ouvrir « Ubuntu » et créer l'utilisateur ;
-2. Docker Desktop → Settings → General : « Use the WSL 2 based engine » ; Resources → WSL integration : activer
-   **Ubuntu**. La mémoire de Docker est alors celle de WSL2, la moitié de la RAM du PC par défaut : 16 Go de RAM
-   suffisent ;
-3. dans le terminal Ubuntu : `sudo apt update && sudo apt install -y git make curl`, puis la commande d'uv ci-dessus ;
-4. cloner **dans Ubuntu** (`cd ~ && git clone …`) : sous `/mnt/c/…`, les fins de ligne et les droits des fichiers
-   cassent le Makefile et les montages de Docker ;
-5. les adresses (`http://127.0.0.1:…`) s'ouvrent dans le navigateur de Windows ; `make ui-open` et
-   `make scenarios-report` n'ouvrent rien depuis WSL : copier l'adresse, ou
-   `explorer.exe "$(wslpath -w state/acceptance/rapport.html)"` pour le rapport.
-
-Vérifier que tout répond, Docker Desktop **ouvert** :
+Docker Desktop doit avoir **8 Go de mémoire** (macOS : Réglages → Resources ; Windows : la moitié de la RAM du PC par
+défaut, donc 16 Go de RAM suffisent). Ouvrir un **nouveau** terminal après les installations, Docker Desktop lancé, et
+vérifier :
 
 ```sh
-docker info --format '{{.ServerVersion}} · {{.NCPU}} CPU · {{.MemTotal}} octets'
-uv --version && git --version && make --version | head -1
+docker info --format "{{.ServerVersion}}"
+uv --version
+git --version
 ```
 
 ### 2. Récupérer le code
@@ -50,7 +40,7 @@ nécessaire (sans webhook Teams, les alertes restent dans l'historique de `make 
 ### 3. Démarrer la stack
 
 ```sh
-make up
+uv run tennis up
 ```
 
 5 à 10 minutes la première fois : téléchargement des données (~45 Mo, vérifiées par SHA-256), construction de l'image,
@@ -60,14 +50,12 @@ commande se termine par :
 
 ```
 modèle en production : v1 (log loss test 0.57146, données jusqu'au 2015-11-29), servi par l'API
-stack prête : make urls (adresses), make scenarios (tests d'acceptation), make demo (la chaîne seule)
 ```
 
 ### 4. Regarder
 
 ```sh
-make urls      # chaque interface, ses identifiants de démo, ● si elle répond
-make ui-open   # l'interface de test : deux joueurs, une surface → leur probabilité
+uv run tennis urls   # chaque interface, ses identifiants de démo, ● si elle répond
 ```
 
 | Interface | Adresse | Ce qu'on y voit |
@@ -81,42 +69,45 @@ make ui-open   # l'interface de test : deux joueurs, une surface → leur probab
 ### 5. Vérifier toute la chaîne : les tests d'acceptation
 
 ```sh
-make scenarios          # S1 → S9, environ 10 minutes, une ligne ✅ par vérification
-make scenarios-report   # le rapport HTML : chaque scénario, chaque vérification, les liens Prefect et MLflow
+uv run tennis scenarios   # S1 → S9, environ 10 minutes, une ligne ✅ par vérification
+uv run tennis report      # le rapport HTML : chaque scénario, chaque vérification, les liens Prefect et MLflow
 ```
 
-Ils partent de l'état laissé par `make up` (une seule version, horloge au 1er janvier 2016) : les lancer **avant**
-`make demo`. Ce que vérifie chaque scénario : [`docs/ACCEPTATION.md`](docs/ACCEPTATION.md).
+Ils partent de l'état laissé par `up` (une seule version, horloge au 1er janvier 2016) : les lancer **avant** `demo`.
+Ce que vérifie chaque scénario : [`docs/ACCEPTATION.md`](docs/ACCEPTATION.md).
 
 ### 6. Laisser la chaîne tourner seule
 
 ```sh
-make demo          # une semaine simulée par minute : ingestion, scoring, feedback, réentraînement, alertes
-make demo-status   # les pas planifiés et les derniers runs
-make demo-stop     # pause (le pas en cours va au bout)
+uv run tennis demo        # une semaine simulée par minute : ingestion, scoring, feedback, réentraînement, alertes
+uv run tennis demo-stop   # pause (le pas en cours va au bout)
 ```
 
-À la main : `make chaos MODE=corrupt` (puis `MODE=off`) pour un lot refusé, `make rollback REASON="…"` pour revenir à
-la version précédente, `make predict` pour une prédiction en ligne de commande.
+Suivre dans Prefect (les pas de `simulation-atp`), MLflow (les nouvelles versions) et Grafana (le dashboard métier).
 
 ### 7. Arrêter, ou repartir de zéro
 
 ```sh
-make down    # arrête la stack, garde les données (make up la relance telle quelle)
-make reset   # efface tout (bases, MLflow, Grafana, état local) sauf les données téléchargées
+uv run tennis down    # arrête la stack, garde les données (up la relance telle quelle)
+uv run tennis reset   # efface tout (bases, MLflow, Grafana, état local) sauf les données téléchargées
 ```
 
-Après `make reset`, `make up` puis `make scenarios` rejouent exactement le même parcours.
+Après `reset`, `up` puis `scenarios` rejouent exactement le même parcours.
+
+Sous macOS et Linux, `make up`, `make urls`, `make scenarios`, `make scenarios-report`, `make demo`, `make demo-stop`,
+`make down` et `make reset` font la même chose ; le Makefile donne aussi accès à toutes les autres commandes du projet
+(`make help`).
 
 ### En cas de souci
 
 | Symptôme | Cause probable | Que faire |
 |---|---|---|
-| `Cannot connect to the Docker daemon` | Docker Desktop fermé | l'ouvrir, attendre « Engine running », relancer `make up` |
+| « Docker ne répond pas » | Docker Desktop fermé | l'ouvrir, attendre « Engine running », relancer `uv run tennis up` |
+| `uv` ou `git` introuvable | terminal ouvert avant l'installation | ouvrir un nouveau terminal |
 | `port is already allocated` | un autre programme sur un des ports (8000, 8001, 8090, 8501, 3001, 4201, 5433, 7282, 9091) | l'arrêter, ou changer le port dans `.env` |
-| un service `unhealthy`, conteneur relancé en boucle | mémoire de Docker trop juste | 8 Go dans Docker Desktop, `make down && make up` |
-| `make scenarios` refuse : « pas dans l'état laissé par make up » | la stack a déjà servi (démo, entraînements) | `make reset && make up && make scenarios` |
-| un scénario ❌ | voir le rapport (`make scenarios-report`) et le run Prefect lié | `make logs`, `docker compose logs <service>` |
+| un service `unhealthy`, conteneur relancé en boucle | mémoire de Docker trop juste | 8 Go dans Docker Desktop, puis `uv run tennis down` et `up` |
+| `scenarios` refuse : « pas dans l'état laissé par make up » | la stack a déjà servi (démo, entraînements) | `uv run tennis reset`, `up`, puis `scenarios` |
+| un scénario ❌ | voir le rapport (`uv run tennis report`) et le run Prefect lié | `docker compose logs <service>` |
 
 ## Développer
 
@@ -203,6 +194,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `infra/` | Configuration de Prometheus et provisioning de Grafana (sources, dashboards générés) |
 | `loadtest/` | Tests de charge : scénarios Locust, campagne automatisée, configurations A/B/C, résultats |
 | `src/tennis_mlops/acceptance/` | Parcours correcteur : premier modèle au `make up`, tests d'acceptation `make scenarios` |
+| `src/tennis_mlops/cli.py` | `uv run tennis …` : le parcours correcteur sans `make`, identique sous macOS, Linux et Windows |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |

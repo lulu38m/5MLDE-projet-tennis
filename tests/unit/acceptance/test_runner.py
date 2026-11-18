@@ -79,12 +79,15 @@ def test_a_stack_that_is_down_or_already_used_is_refused_with_the_command_to_run
     assert "silence" not in stack.calls  # rien n'a été touché
 
     used = FakeStack(now_day=date(2017, 3, 4), tags={"1": {}, "2": {}, "3": {}})
-    with pytest.raises(NotReadyError, match=r"3 versions .* horloge simulée au 2017-03-04 .* make reset && make up"):
+    with pytest.raises(
+        NotReadyError,
+        match=r"3 versions .* horloge simulée au 2017-03-04 .*uv run tennis reset.*make reset && make up",
+    ):
         campaign(used)[0].run()
 
     forced, _, _ = campaign(used, force=True, scenarios=(Passes,))
     result = forced.run()
-    assert result.passed and any("FORCE=1" in note for note in result.notes)
+    assert result.passed and any("--force" in note for note in result.notes)
 
 
 def test_the_nine_scenarios_are_in_order() -> None:

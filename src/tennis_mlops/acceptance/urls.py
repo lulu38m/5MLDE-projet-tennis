@@ -77,7 +77,7 @@ def lines(settings: Settings, get: Callable[[str], int] | None = None) -> list[s
     for entry in entries(settings):
         mark = " " if entry.probe is None else ("●" if probe(entry.probe) == 200 else "○")
         rows.append(f"{mark} {entry.name:<20} {entry.url:<52} {entry.access}")
-    return [*rows, "", "● répond · ○ ne répond pas (make up, puis make ps)"]
+    return [*rows, "", "● répond · ○ ne répond pas (`uv run tennis up`, puis docker compose ps)"]
 
 
 def _status(url: str) -> int:

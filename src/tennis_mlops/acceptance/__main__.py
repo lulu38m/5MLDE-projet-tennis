@@ -89,7 +89,10 @@ def _bootstrap(settings: Settings) -> int:
         return EXIT_FAILED
     finally:
         stack.close()
-    print("stack prête : make urls (adresses), make scenarios (tests d'acceptation), make demo (la chaîne seule)")
+    print(
+        "stack prête : `uv run tennis urls` (adresses), `uv run tennis scenarios` (tests d'acceptation), "
+        "`uv run tennis demo` (la chaîne seule) ; ou make urls, make scenarios, make demo"
+    )
     return EXIT_OK
 
 
@@ -113,7 +116,7 @@ def _run(settings: Settings, only: frozenset[str], *, teams: bool, force: bool, 
         stack.close()
     page = result.write(Path(report_dir) if report_dir else PROJECT_ROOT / REPORT_DIR)
     shown = page.relative_to(PROJECT_ROOT) if page.is_relative_to(PROJECT_ROOT) else page
-    print(f"\n{result.summary()}\nrapport : {shown}  (make scenarios-report)")
+    print(f"\n{result.summary()}\nrapport : {shown}  (uv run tennis report, ou make scenarios-report)")
     return EXIT_OK if result.passed else EXIT_FAILED
 
 

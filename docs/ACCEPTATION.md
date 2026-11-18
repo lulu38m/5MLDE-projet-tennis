@@ -4,14 +4,15 @@ Objectif : cloner le dépôt et rejouer **toute** la chaîne en trois commandes,
 
 ```sh
 git clone https://github.com/lulu38m/5MLDE-projet-tennis.git && cd 5MLDE-projet-tennis
-make up          # stack + données + premier modèle en production (~5 à 10 min la première fois)
-make scenarios   # les 9 tests d'acceptation, ~10 min ; rapport : make scenarios-report
+uv run tennis up          # stack + données + premier modèle en production (~5 à 10 min la première fois)
+uv run tennis scenarios   # les 9 tests d'acceptation, ~10 min ; rapport : uv run tennis report
 ```
 
-Prérequis : **Docker Desktop** (Compose v2, 8 Go de mémoire pour la VM conseillés), **uv** et **make**. Python 3.12 est
-installé par uv. Les ports utilisés sont tous liés à `127.0.0.1` (`make urls` les liste).
+Prérequis : **Docker Desktop** (Compose v2, 8 Go de mémoire conseillés), **uv** et **git**. Python 3.12 est installé
+par uv. Mêmes commandes sous macOS, Linux et Windows (PowerShell) ; sous macOS et Linux, `make up`, `make scenarios`…
+font la même chose. Les ports utilisés sont tous liés à `127.0.0.1` (`uv run tennis urls` les liste).
 
-## Ce que fait `make up`
+## Ce que fait `uv run tennis up` (ou `make up`)
 
 1. crée `.env` depuis `.env.example` s'il n'existe pas : rien à remplir (sans webhook Teams, les alertes restent dans
    l'historique de `make alerts`) ;
@@ -28,7 +29,7 @@ Idempotent : relancé sur une stack qui a déjà un modèle en production, il v�
 > classé gagne » en accuracy (68,9 % contre 69,3 %) et la règle de mise en service le refuse, à raison. Le rejeu
 > commence donc le 1er janvier 2016 (`simulation.replay_start`, `MOCK_START_DATE`).
 
-## `make scenarios`
+## `uv run tennis scenarios` (ou `make scenarios`)
 
 | # | Scénario | Ce qui est fait | Vérifié automatiquement |
 |---|---|---|---|
@@ -45,9 +46,9 @@ Idempotent : relancé sur une stack qui a déjà un modèle en production, il v�
 Chaque vérification est une ligne ✅ ou ❌ dans le terminal et dans le rapport. Code de sortie 0 si tout est vert.
 
 ```sh
-make scenarios ONLY=S2,S5    # quelques scénarios seulement
-make scenarios TEAMS=1       # laisser partir les cartes Teams (par défaut : mode silence)
-make scenarios-report        # ouvre state/acceptance/rapport.html (et rapport.json à côté)
+uv run tennis scenarios --only S2,S5   # quelques scénarios seulement      (make scenarios ONLY=S2,S5)
+uv run tennis scenarios --teams        # laisser partir les cartes Teams    (make scenarios TEAMS=1)
+uv run tennis report                   # state/acceptance/rapport.html     (make scenarios-report)
 ```
 
 ### Point de départ connu
@@ -55,14 +56,16 @@ make scenarios-report        # ouvre state/acceptance/rapport.html (et rapport.j
 Les scénarios s'enchaînent sur la même stack (S7 annule la promotion faite par S1) et partent de l'état laissé par
 `make up` : **une seule version, en production, horloge au 1er janvier 2016**. Toutes les données et tous les
 entraînements étant déterministes, le résultat est le même sur toutes les machines. Sur une stack qui a déjà servi
-(démo, entraînements), `make scenarios` refuse de démarrer et donne la commande :
+(démo, entraînements), `scenarios` refuse de démarrer et donne la commande :
 
 ```sh
-make reset && make up && make scenarios
+uv run tennis reset
+uv run tennis up
+uv run tennis scenarios
 ```
 
-`make reset` supprime les volumes (bases, MLflow, Grafana) et l'état local (`state/`), pas les données de `data/raw`.
-`FORCE=1` joue quand même, sans garantie sur S1 (la règle de mise en service peut alors refuser la nouvelle version).
+`reset` supprime les volumes (bases, MLflow, Grafana) et l'état local (`state/`), pas les données de `data/raw`.
+`--force` (`FORCE=1` avec make) joue quand même, sans garantie sur S1 (la règle de mise en service peut alors refuser la nouvelle version).
 
 Pourquoi S1 avance de cinq mois d'un coup : la règle ne met en production qu'une version **au moins aussi bonne** que
 celle en service, mesurée sur le même test. Mesuré sur nos données, avec un, deux ou trois mois de 2016 en plus, la
@@ -84,6 +87,7 @@ nouvelle version reste légèrement moins bonne que v1 (log loss + 0,002 environ
 
 | Fichier | Rôle |
 |---|---|
+| `src/tennis_mlops/cli.py` | `uv run tennis …` : le parcours, sans `make`, identique sous macOS, Linux et Windows |
 | `src/tennis_mlops/acceptance/scenarios.py` | les 9 scénarios et leurs vérifications |
 | `src/tennis_mlops/acceptance/runner.py` | vérifications préalables, silence, enchaînement, remise en ordre |
 | `src/tennis_mlops/acceptance/stack.py` | la stack vue par ses interfaces publiques (API d'admin de la source, API, alertes, MLflow, Prefect, base en lecture) |

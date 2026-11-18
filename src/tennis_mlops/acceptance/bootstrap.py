@@ -37,7 +37,10 @@ def bootstrap(stack: Stack, actions: Actions, log: Callable[[str], None] = print
             outcome = actions.ingest()
             summary = getattr(outcome.result, "summary", lambda: outcome.state_name)()
             if outcome.failed or outcome.state_name != "Completed":
-                msg = f"ingestion initiale : {outcome.state_name} ({summary}) — voir Prefect, puis relancer make up"
+                msg = (
+                    f"ingestion initiale : {outcome.state_name} ({summary}) — voir Prefect, puis relancer "
+                    "`uv run tennis up` (make up)"
+                )
                 raise BootstrapError(msg)
             log(f"  {summary}")
         if not stack.events("training_requested", start):

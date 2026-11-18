@@ -26,6 +26,10 @@ dependencies = [
     "uvicorn==0.54.0",
 ]
 
+[project.scripts]
+# Le parcours correcteur, identique sous macOS, Linux et Windows : `uv run tennis up`, `uv run tennis scenarios`…
+tennis = "tennis_mlops.cli:main"
+
 [dependency-groups]
 dev = [
     "locust==2.47.0",

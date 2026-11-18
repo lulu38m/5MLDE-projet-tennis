@@ -37,5 +37,4 @@ def test_the_worker_writes_state_as_the_host_user() -> None:
     assert "./state:/app/state" in worker["volumes"]
     assert worker["environment"]["PREFECT_HOME"].startswith("/tmp/")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "export HOST_UID HOST_GID" in makefile
-    assert "@mkdir -p state" in makefile  # avant `docker compose up`, sinon Docker le crée au nom de root
+    assert "export HOST_UID HOST_GID" in makefile  # make load relance la stack : même identité

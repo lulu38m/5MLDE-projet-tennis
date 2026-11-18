@@ -22,6 +22,7 @@ run MLflow pointe vers le run Prefect (tag `prefect.flow_run_url`).
 
 | Étape | Task Prefect | Rôle |
 |---|---|---|
+| 0 | (avant la campagne) | Aucun lot en quarantaine non résolu, sinon interruption (voir [Incidents](#incidents)) |
 | 1 | `DatasetBuilder.build` | Lit les matchs validés dans PostgreSQL et calcule les features de chaque match joué |
 | 2 | `TemporalSplitter.split` | Entraînement → validation (6 mois) → test (6 derniers mois) |
 | 3 | `profil et dérive des données` | Jeux associés au run (`log_input`), instantané Parquet + SHA-256, profil, dérive |
@@ -196,6 +197,7 @@ des 300 autorisées ; avec un taux de 0,03, il va jusqu'à 150 à 210 itération
 
 | Situation | Comportement |
 |---|---|
+| Lot en quarantaine non résolu | **Entraînement interrompu** avant tout calcul (`entraînement interrompu : N lot(s) en quarantaine non résolu(s) (…)`), flow `Failed` → carte Teams « échec » ; ni run MLflow ni version. Il repart dès que le lot, source corrigée, est réingéré valide (`make ingest`) |
 | MLflow injoignable | Erreur explicite avant tout calcul (`serveur MLflow indisponible`), flow `Failed`, rien n'est publié |
 | Trop peu de données | Flow `Failed`, run de campagne fermé en `FAILED` avec `failure.step = TemporalSplitter.split` et la cause |
 | Un candidat échoue (ex. hyperparamètre invalide) | Son run est fermé en `FAILED` avec la cause, les autres candidats continuent |

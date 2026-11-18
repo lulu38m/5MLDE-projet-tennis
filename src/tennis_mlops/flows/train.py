@@ -52,6 +52,7 @@ from sklearn.pipeline import Pipeline
 
 from tennis_mlops.alerts.client import AlertSinkClient
 from tennis_mlops.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, ProjectConfig, Settings
+from tennis_mlops.data.errors import DataQualityError
 from tennis_mlops.features import FEATURES_VERSION
 from tennis_mlops.ingestion.store import IngestionStore
 from tennis_mlops.log import quiet_training_noise
@@ -417,6 +418,7 @@ def training_flow(
     workers = workers or config.workers
     deps = dependency_factory(config, settings)
     tracker, logger = deps.tracker, get_run_logger()
+    ensure_no_quarantine(deps.source.lots_summary())
     context = _campaign_tags(settings)
     campaign_id = tracker.start_run(f"campagne {time.strftime('%Y-%m-%d %H:%M')}", context)
     logger.info("campagne MLflow : %s", tracker.run_url(campaign_id))
@@ -434,6 +436,22 @@ def training_flow(
         raise
     logger.info(report.summary())
     return report
+
+
+def ensure_no_quarantine(summary: Mapping[str, Any]) -> None:
+    """Interrompt l'entraînement tant qu'un lot reste en quarantaine (non-conformité non résolue).
+
+    Les matchs refusés ne sont jamais stockés ; mais entraîner sans eux donnerait un modèle sur un historique troué
+    (un tournoi manquant fausse l'Elo et la forme). Un lot repassé valide après correction ne compte plus.
+    """
+    count = int(summary.get("lots_quarantined") or 0)
+    if count:
+        names = ", ".join(str(lot) for lot in summary.get("quarantined_lots") or [])
+        raise DataQualityError(
+            f"entraînement interrompu : {count} lot(s) en quarantaine non résolu(s)"
+            + (f" ({names})" if names else "")
+            + " — corriger la source puis réingérer (make ingest)"
+        )
 
 
 @dataclass

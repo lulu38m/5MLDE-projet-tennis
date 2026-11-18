@@ -47,7 +47,7 @@ class Campaign:
     actions: Actions
     scenarios: Sequence[Callable[[], Scenario]] = SCENARIOS
     only: frozenset[str] = frozenset()
-    teams: bool = False
+    teams: bool = True  # les cartes partent sur Teams ; False : mode silence (`--silence`)
     force: bool = False
     log: Callable[[str], None] = print
     notes: list[str] = field(default_factory=list)
@@ -163,9 +163,10 @@ class Campaign:
             self.notes.append("simulation planifiée mise en pause (`uv run tennis demo` pour la relancer)")
         teams = bool(stack.alert_health().get("teams"))
         if self.teams:
-            self.notes.append("TEAMS=1 : les cartes partent sur Teams" if teams else "aucun webhook Teams configuré")
+            self.notes.append("cartes Teams envoyées pendant les tests (--silence pour les garder)" if teams
+                              else "aucun webhook Teams configuré : alertes gardées dans l'historique")  # fmt: skip
             return
-        stack.silence(SILENCE_MIN, "tests d'acceptation (make scenarios)")
+        stack.silence(SILENCE_MIN, "tests d'acceptation (--silence)")
         if teams:
             self.notes.append("mode silence : les alertes sont reçues et gardées, aucune carte n'est envoyée sur Teams")
 

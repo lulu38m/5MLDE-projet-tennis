@@ -2,7 +2,7 @@
 
 - `bootstrap` : fin de `make up` — premier modèle entraîné par la chaîne et servi par l'API (rien à faire s'il y en a
   déjà un) ;
-- `run [--only S2,S7] [--teams] [--force]` : `make scenarios` — les tests d'acceptation S1 → S9, rapport HTML dans
+- `run [--only S2,S7] [--silence] [--force]` : `make scenarios` — les tests d'acceptation S1 → S9, rapport HTML dans
   `state/acceptance/rapport.html` ; code de sortie 0 si tout est vert, 1 sinon, 2 si la stack n'est pas prête ;
 - `urls` : `make urls` — les interfaces, leurs identifiants de démo, et si elles répondent.
 """
@@ -47,7 +47,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("bootstrap", help="premier modèle en production (fin de make up)")
     run = commands.add_parser("run", help="tests d'acceptation S1 → S9 (make scenarios)")
     run.add_argument("--only", default="", help="scénarios à jouer, séparés par des virgules (ex. S2,S5)")
-    run.add_argument("--teams", action="store_true", help="laisser partir les cartes Teams (pas de mode silence)")
+    run.add_argument("--silence", action="store_true", help="mode silence : alertes gardées, aucune carte Teams")
+    run.add_argument("--teams", action="store_true", help=argparse.SUPPRESS)  # ancien drapeau : c'est le défaut
     run.add_argument("--force", action="store_true", help="jouer même hors de l'état de référence de make up")
     run.add_argument("--report-dir", default=None, help="dossier du rapport (défaut : state/acceptance)")
     commands.add_parser("urls", help="interfaces de la stack (make urls)")
@@ -70,7 +71,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"scénarios inconnus : {', '.join(unknown)} (S1 … S9)", file=sys.stderr)
         return EXIT_NOT_READY
     configure_environment(settings)
-    return _run(settings, only, teams=args.teams, force=args.force, report_dir=args.report_dir)
+    return _run(settings, only, teams=not args.silence, force=args.force, report_dir=args.report_dir)
 
 
 def _bootstrap(settings: Settings) -> int:

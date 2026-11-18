@@ -133,9 +133,11 @@ def test_training_reads_matches_and_lot_provenance(store: IngestionStore, lot: L
     assert len(frame) == 7
     assert {"match_id", "winner_rank", "dataset_version"} <= set(frame.columns)
     summary = store.lots_summary()
-    assert (summary["lots_valid"], summary["lots_quarantined"]) == (1, 1)
+    assert (summary["lots_valid"], summary["lots_quarantined"], summary["quarantined_lots"]) == (1, 1, ["2019-0002"])
     assert summary["last_valid_lot"] == "2019-0001"
     assert summary["watermark"] == "2019-01-14"
+    store.save_valid_lot(replace(lot, lot_id="2019-0002"), OK, "state/lots/2019-0002", "run-2")  # source corrigée
+    assert (store.lots_summary()["lots_quarantined"], store.lots_summary()["quarantined_lots"]) == (0, [])
 
 
 def test_too_short_text_columns_are_widened(store: IngestionStore) -> None:

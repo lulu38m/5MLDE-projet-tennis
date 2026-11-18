@@ -115,7 +115,8 @@ make lots                               # les lots de la semaine en quarantined,
 1. **Prefect** : le run `ingestion-atp` en `Failed`, les tasks « quarantaine » ;
 2. **Teams** : la carte « 🚫 Lot refusé par Great Expectations » (tournoi, contrôles en échec, lien vers le run) ;
 3. **Grafana** : l'annotation rouge sur les dashboards ;
-4. aucun entraînement n'est parti, la production n'a pas bougé.
+4. aucun entraînement n'est parti, la production n'a pas bougé ; et si on en force un (`make train`), il est
+   **interrompu** : « entraînement interrompu : N lot(s) en quarantaine non résolu(s) », carte « échec » dans Teams.
 
 ```sh
 make chaos MODE=off && make ingest      # reprise : les mêmes lots passent

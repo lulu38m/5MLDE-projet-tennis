@@ -38,3 +38,12 @@ def test_the_worker_writes_state_as_the_host_user() -> None:
     assert worker["environment"]["PREFECT_HOME"].startswith("/tmp/")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert "export HOST_UID HOST_GID" in makefile  # make load relance la stack : même identité
+
+
+def test_mlflow_does_not_start_its_job_runner() -> None:
+    """MLflow 3.16 démarre par défaut un « job runner » de 7 processus (~240 Mo chacun) : au-delà de la limite mémoire
+    du conteneur, ses workers étaient tués en boucle et le registre ne répondait plus (`uv run tennis up` en échec)."""
+    mlflow = COMPOSE["services"]["mlflow"]
+    assert mlflow["environment"]["MLFLOW_SERVER_ENABLE_JOB_EXECUTION"] == "false"
+    assert mlflow["deploy"]["resources"]["limits"]["memory"] == "1g"
+    assert _locked("mlflow") == "3.16.1"  # à revoir si MLflow change : la variable pourrait changer de nom

@@ -106,8 +106,17 @@ def test_s2_a_corrupt_lot_is_blocked_and_then_recovered() -> None:
     out = texts(rec)
     assert "expectations custom en échec : expect_tennis_score_to_be_valid" in out
     assert "aucun entraînement demandé ni lancé" in out and "carte quarantaine" in out
+    assert "Failed : « entraînement interrompu : 1 lot(s) en quarantaine non résolu(s) (2015-0400) »" in out
+    assert "aucune nouvelle version enregistrée" in out and "carte echec" in out
     assert "reprise : incident arrêté, les 1 lot(s) refusé(s) passent" in out
-    assert actions.calls == ["ingest chaos=corrupt", "ingest chaos=off"] and stack.chaos_mode == "off"
+    assert actions.calls == ["ingest chaos=corrupt", "train", "ingest chaos=off"] and stack.chaos_mode == "off"
+
+
+def test_s2_fails_when_training_still_runs_during_the_quarantine() -> None:
+    stack, actions = quarantine_world("corrupt", {"expectation": "expect_tennis_score_to_be_valid", "target": "score"})
+    actions.quarantine_blocks = False
+    with pytest.raises(ScenarioFailedError, match="entraînement non interrompu"):
+        play(sc.S2Corrupt(), stack, actions)
 
 
 def test_s2_fails_without_a_custom_expectation() -> None:

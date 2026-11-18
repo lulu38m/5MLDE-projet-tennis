@@ -2,7 +2,17 @@
 
 Chaîne MLOps complète qui prédit la probabilité de victoire d'un joueur dans un match ATP. Les matchs historiques
 sont rejoués dans le temps par une API simulée, ce qui permet de démontrer l'ingestion continue, les contrôles
-qualité, le réentraînement, la mise en service et la supervision.
+qualité, le réentraînement, la mise en service et la supervision. Le modèle est volontairement simple (régression
+logistique sur des features Elo, forme, face-à-face) : ce qui compte est la chaîne, opérationnelle, reproductible et
+maintenable ; ses métriques servent à suivre et à décider des mises en service.
+
+| Livrable | Où |
+|---|---|
+| **Synthèse OPS** : décisions techniques, preuves d'intégration, tests de charge, dimensionnement recommandé, limites connues | [`docs/SYNTHESE_OPS.md`](docs/SYNTHESE_OPS.md) |
+| Architecture | ci-dessous, et [`docs/architecture.md`](docs/architecture.md) |
+| Données : provenance, licence, récupération, rejeu par lots | [Données](#données), [`docs/DONNEES.md`](docs/DONNEES.md) |
+| Reproduire : installation et commandes | [Lancer le projet, de zéro](#lancer-le-projet-de-zéro) |
+| Démonstration : fonctionnement nominal et incidents contrôlés, vérifiés automatiquement (S1 → S9) | [`docs/ACCEPTATION.md`](docs/ACCEPTATION.md), déroulé de la soutenance : [`docs/DEMO.md`](docs/DEMO.md) |
 
 ## Architecture
 
@@ -213,7 +223,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make dashboards` | Régénère les JSON des dashboards depuis leur code (`monitoring/dashboards.py`) |
 | `make load` / `make load-full` | Campagne de charge courte (~6 min) / complète (~75 min, configs A, B, C) : rapport, CSV, graphiques |
 | `make load-ui` | Locust avec son interface web (http://127.0.0.1:8089) |
-| `make scenarios [ONLY=S2,S5] [TEAMS=1]` | Tests d'acceptation S1 → S9 sur la stack, rapport HTML (`make scenarios-report`) |
+| `make scenarios [ONLY=S2,S5] [SILENCE=1]` | Tests d'acceptation S1 → S9 sur la stack, cartes Teams comprises (`SILENCE=1` : aucune), rapport HTML (`make scenarios-report`) |
 
 ## Organisation du code
 
@@ -266,7 +276,8 @@ Matchs, classements et joueurs ATP 2010 → mai 2026 de Jeff Sackmann
 ([tennis_atp](https://github.com/JeffSackmann/tennis_atp)), récupérés depuis Hugging Face
 ([`Aneeshers/tennis-sackmann-archive`](https://huggingface.co/datasets/Aneeshers/tennis-sackmann-archive)) avec le
 miroir GitHub du même dataset en secours. Licence **CC BY-NC-SA 4.0** (non commercial) : aucun fichier de données
-n'est versionné, `make data` les télécharge.
+n'est versionné : `uv run tennis up` les télécharge (seul : `make data`, ou
+`uv run python -m tennis_mlops.data download`) et vérifie chaque fichier contre le verrou.
 
 - **Reproductible** : `configs/data.lock.json` fige la révision de chaque source et le SHA-256 de chaque fichier ;
   la `dataset_version` qui en découle identifie exactement les données utilisées.
@@ -295,7 +306,7 @@ backoff), contrôle chaque lot avec Great Expectations puis stocke dans PostgreS
   match dans le futur, volume = tableau).
 - **Surveillance** (non bloquant) : dérive de l'écart de classement, comparée aux tournois du même niveau.
 - **Lot refusé** : quarantaine (`state/quarantine/`), flow `Failed`, rien n'est stocké pour ce lot, reprise au
-  passage suivant.
+  passage suivant. Tant qu'un lot reste en quarantaine, **l'entraînement est interrompu** (flow `Failed`, alerte).
 - **Source en panne** : retries, puis état « Dégradé » sans perte ; les données déjà ingérées restent utilisables.
 
 Déroulé, contrôles, incidents et démo : [`docs/INGESTION.md`](docs/INGESTION.md).

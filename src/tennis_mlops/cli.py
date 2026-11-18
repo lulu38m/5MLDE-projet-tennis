@@ -8,7 +8,7 @@ appelle les mêmes commandes ; `make up` et `uv run tennis up` font exactement l
 |---|---|
 | `up` | `.env` créé si absent, données vérifiées, stack construite et démarrée, premier modèle servi |
 | `urls` | interfaces, identifiants de démo, et si elles répondent |
-| `scenarios [--only S2,S5] [--teams] [--force]` | tests d'acceptation S1 → S9, rapport HTML |
+| `scenarios [--only S2,S5] [--silence] [--force]` | tests d'acceptation S1 → S9, rapport HTML |
 | `report` | ouvre le rapport du dernier `scenarios` |
 | `demo` / `demo-stop` | la chaîne tourne seule / en pause |
 | `down` / `reset` | arrêt (données gardées) / remise à zéro complète (sauf les données téléchargées) |
@@ -168,7 +168,8 @@ def main(argv: Sequence[str] | None = None, cli: Cli | None = None) -> int:
     commands.add_parser("urls", help="interfaces, identifiants, état")
     scenarios = commands.add_parser("scenarios", help="tests d'acceptation S1 → S9")
     scenarios.add_argument("--only", default="", help="ex. S2,S5")
-    scenarios.add_argument("--teams", action="store_true", help="laisser partir les cartes Teams")
+    scenarios.add_argument("--silence", action="store_true", help="aucune carte Teams (alertes gardées)")
+    scenarios.add_argument("--teams", action="store_true", help=argparse.SUPPRESS)  # ancien drapeau : c'est le défaut
     scenarios.add_argument("--force", action="store_true", help="jouer hors de l'état de référence")
     commands.add_parser("report", help="ouvre le rapport des tests d'acceptation")
     commands.add_parser("demo", help="la chaîne tourne seule (une semaine simulée par minute)")
@@ -183,7 +184,7 @@ def main(argv: Sequence[str] | None = None, cli: Cli | None = None) -> int:
     if args.command == "urls":
         return cli.module("tennis_mlops.acceptance", "urls")
     if args.command == "scenarios":
-        options = [*(["--only", args.only] if args.only else []), *(["--teams"] if args.teams else []),
+        options = [*(["--only", args.only] if args.only else []), *(["--silence"] if args.silence else []),
                    *(["--force"] if args.force else [])]  # fmt: skip
         return cli.module("tennis_mlops.acceptance", "run", *options)
     if args.command == "report":

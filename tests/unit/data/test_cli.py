@@ -21,7 +21,7 @@ def project(tmp_path: Path) -> Path:
     text = text.replace("first_match_year: 2010", "first_match_year: 2019")
     text = text.replace("last_match_year: 2026", "last_match_year: 2020")
     text = text.replace("bootstrap_start: 2010-01-01", "bootstrap_start: 2019-01-01")
-    text = text.replace("replay_start: 2015-01-01", "replay_start: 2019-06-01")
+    text = text.replace("replay_start: 2016-01-01", "replay_start: 2019-06-01")
     text = text.replace("replay_end: 2026-05-31", "replay_end: 2020-12-31")
     (tmp_path / "configs" / "project.yaml").write_text(text, encoding="utf-8")
     return tmp_path

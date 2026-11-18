@@ -96,7 +96,7 @@ deux joueurs au début du tournoi, ce dont l'entraînement a besoin.
 ## Démo (vérifiée de bout en bout)
 
 ```sh
-make ingest                                   # amorçage : 14 899 matchs (2010 → 2014)
+make ingest                                   # amorçage : 17 842 matchs (2010 → 2015)
 make advance DAYS=14 && make ingest           # nouveaux tournois stockés
 make chaos MODE=corrupt && make advance DAYS=7 && make ingest   # Failed : lots en quarantaine
 make lots                                     # statut quarantined + contrôles en échec

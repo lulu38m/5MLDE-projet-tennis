@@ -69,7 +69,7 @@ def test_everything_green_runs_every_query_of_every_dashboard() -> None:
     expected = sum(len(list(queries(b))) for b in BOARDS.values())
     assert len(asked) == expected
     # Le dashboard métier est interrogé sur sa période simulée (dates absolues en millisecondes).
-    metier = [a for a in asked if a["from"] == "1420070400000"]
+    metier = [a for a in asked if a["from"] == "1451606400000"]
     assert metier and all(a["to"] == "1780272000000" for a in metier)
     assert any(a["from"] == "now-1h" for a in asked)
 

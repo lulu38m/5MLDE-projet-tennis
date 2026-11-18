@@ -9,7 +9,8 @@
         api api-status predict predictions score feedback \
         ui ui-open ui-smoke \
         dashboards grafana grafana-check prometheus \
-        load load-full load-ui
+        load load-full load-ui \
+        reset scenarios scenarios-report
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -41,9 +42,10 @@ export TENNIS_ALERT_HOST
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 export GIT_COMMIT
 GX_DOCS := state/gx/gx/uncommitted/data_docs/local_site/index.html
+RESET_DIRS := state/gx state/lots state/quarantine state/alerts state/acceptance
 
 help: ## Affiche cette aide
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}'
 
 # --------------------------------------------------------------------------- qualité
 
@@ -83,11 +85,25 @@ data-lock: ## (Mainteneurs) Résout les révisions actuelles des sources et rég
 
 # --------------------------------------------------------------------------- stack Docker
 
-up: data ## Construit et démarre la stack (attend que les services soient sains)
+# Créé une seule fois, jamais écrasé : aucun secret n'est nécessaire (sans webhook Teams, les alertes restent dans
+# l'historique de `make alerts`).
+.env:
+	cp .env.example .env
+	@echo ".env créé depuis .env.example (rien à remplir pour la démo)"
+
+up: .env data ## Construit et démarre la stack, puis un premier modèle entraîné par la chaîne et servi par l'API
 	docker compose up -d --build --wait
+	$(UV) python -m tennis_mlops.acceptance bootstrap
 
 down: ## Arrête la stack (les volumes sont conservés)
 	docker compose down
+
+reset: ## Remise à zéro : stack arrêtée, volumes supprimés (bases, MLflow, Grafana) et état local effacé ; garde data/raw
+	docker compose down --volumes --remove-orphans
+	@# Fichiers écrits par le worker (utilisateur app de l'image) : sous Linux, seul root peut les effacer.
+	rm -rf $(RESET_DIRS) 2>/dev/null || docker run --rm --user 0 -v "$(CURDIR)/state:/app/state" tennis-mlops:local \
+		rm -rf $(addprefix /app/,$(RESET_DIRS))
+	@echo "stack remise à zéro : make up pour repartir de l'état de référence"
 
 logs: ## Suit les logs de la stack
 	docker compose logs -f --tail=100
@@ -95,17 +111,8 @@ logs: ## Suit les logs de la stack
 ps: ## État des services
 	docker compose ps
 
-urls: ## Adresses des interfaces de la stack
-	@echo "mock_source (docs API) : http://127.0.0.1:8001/docs"
-	@echo "Prefect (UI)           : http://127.0.0.1:4201"
-	@echo "MLflow (UI)            : http://127.0.0.1:7282"
-	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
-	@echo "API de prédiction      : $(API_URL)/docs  (make api-status, make predict)"
-	@echo "Interface de test      : $(UI_URL)  (make ui-open)"
-	@echo "Grafana (dashboards)   : $(GRAFANA_URL)  (make grafana ; admin pour modifier)"
-	@echo "Prometheus             : $(PROMETHEUS_URL)/targets  (make prometheus)"
-	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
-	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
+urls: ## Adresses des interfaces, identifiants de démo, et si elles répondent
+	@$(UV) python -m tennis_mlops.acceptance urls
 
 # --------------------------------------------------------------------------- mock_source
 
@@ -262,3 +269,15 @@ load-full: ## Campagne complète (~75 min) : configs A, B, C, rampe 10 → 1 000
 
 load-ui: ## Locust avec son interface web (http://127.0.0.1:8089), charge choisie à la main
 	PYTHONPATH=. $(UV) locust -f loadtest/locustfile.py --host $(API_URL) --web-host 127.0.0.1
+
+# --------------------------------------------------------------------------- tests d'acceptation (phase 11)
+
+ONLY ?=
+TEAMS ?=
+FORCE ?=
+
+scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~15 min) ; `ONLY=S2,S5`, rapport HTML
+	$(UV) python -m tennis_mlops.acceptance run $(if $(ONLY),--only $(ONLY)) $(if $(TEAMS),--teams) $(if $(FORCE),--force)
+
+scenarios-report: ## Ouvre le rapport du dernier `make scenarios`
+	$(UV) python -m webbrowser -t "file://$(CURDIR)/state/acceptance/rapport.html"

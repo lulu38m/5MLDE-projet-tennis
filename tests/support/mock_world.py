@@ -116,7 +116,7 @@ def write_project_config(root: Path, *, replay_start: str = "2019-02-01", state_
         ("first_match_year: 2010", "first_match_year: 2019"),
         ("last_match_year: 2026", "last_match_year: 2020"),
         ("bootstrap_start: 2010-01-01", "bootstrap_start: 2019-01-01"),
-        ("replay_start: 2015-01-01", f"replay_start: {replay_start}"),
+        ("replay_start: 2016-01-01", f"replay_start: {replay_start}"),
         ("replay_end: 2026-05-31", "replay_end: 2020-12-31"),
         ("retry_delays_s: [1, 2, 4]", "retry_delays_s: [0, 0, 0]"),
         ("drift_min_history: 20", "drift_min_history: 3"),

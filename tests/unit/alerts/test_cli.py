@@ -41,4 +41,5 @@ def test_serve_builds_the_service_from_settings(tmp_path: Path, monkeypatch: pyt
     assert main(["serve", "--host", "0.0.0.0", "--port", "8091"], settings(tmp_path)) == EXIT_SENT
     assert (started["host"], started["port"]) == ("0.0.0.0", 8091)
     health = TestClient(started["app"]).get("/health").json()
-    assert health == {"status": "ok", "teams": False, "teams_events": ["degrade", "echec", "quarantaine", "rollback"]}
+    assert health["teams"] is False and health["silence"]["active"] is False
+    assert health["teams_events"] == ["degrade", "echec", "quarantaine", "rollback"]

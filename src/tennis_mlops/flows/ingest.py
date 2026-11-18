@@ -1,7 +1,7 @@
 """Flow Prefect d'ingestion (mode pull) : de `mock_source` à PostgreSQL, à travers les contrôles qualité.
 
 ```
-GET /admin/clock ─► amorçage 2010→2015 (une fois) ─► GET /tournaments (terminés depuis le watermark)
+GET /admin/clock ─► amorçage 2010→2016 (une fois) ─► GET /tournaments (terminés depuis le watermark)
    └─► pour chaque tournoi : GET /tournaments/{id}/results ─► Great Expectations ─┬─► stockage (transaction)
                                                                                     └─► quarantaine
    └─► watermark avancé jusqu'au premier lot refusé (il sera retenté au prochain passage)

@@ -63,7 +63,7 @@ requête passe donc en revue de code, et un test refuse un JSON qui ne correspon
 ## Métier : le modèle prédit-il bien ? (temps simulé)
 
 L'axe des temps est **la date des matchs**, pas l'heure réelle : la démo rejoue des années en quelques minutes. La
-période affichée par défaut couvre tout le jeu (2015 → 2026) ; zoomer sur une saison fonctionne comme d'habitude.
+période affichée par défaut couvre tout le jeu (2016 → 2026) ; zoomer sur une saison fonctionne comme d'habitude.
 
 On ne juge que les prédictions **du scoring**, faites avant le match, sur le résultat **validé** par l'ingestion
 (`feedbacks`) : jamais une prédiction faite après coup.

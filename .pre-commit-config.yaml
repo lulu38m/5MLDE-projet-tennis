@@ -7,6 +7,8 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # Syntaxe seulement : loadtest/compose.C.yml utilise la balise `!reset` de docker compose, inconnue de PyYAML.
+        args: ["--unsafe"]
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=500"]      # aucun dataset ne doit entrer dans Git

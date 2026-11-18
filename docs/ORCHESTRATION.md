@@ -8,6 +8,24 @@
 Code : `src/tennis_mlops/orchestration/` (`setup.py`, `trigger.py`, `events.py`, `decisions.py`, `clock.py`) et
 `src/tennis_mlops/flows/simulation.py`. Les alertes : [`ALERTES.md`](ALERTES.md).
 
+**Horloge recalée à chaque pas.** L'horloge de `mock_source` vit en mémoire : un redémarrage du conteneur (`make
+down`, image reconstruite par `make up`) la renvoie au début du rejeu alors que la base a déjà ingéré des années.
+Avant d'avancer, chaque pas compare l'horloge au watermark de l'ingestion (date jusqu'à laquelle tout est ingéré)
+et la remet dessus si elle est en retard (`SimulationClock.catch_up`) ; le rapport du pas l'indique (« horloge
+recalée depuis… »). Plus besoin de `make clock DATE=…` après un redémarrage.
+
+**Le serveur Prefect tourne dans l'image du projet**, pas dans `prefecthq/prefect` : cette dernière installe le
+dernier SQLAlchemy (2.1), avec lequel le planificateur de Prefect 3.8.7 échoue sur PostgreSQL (« Can't evaluate bulk
+DML statement ») et ne crée aucun pas planifié ; seuls les pas lancés par `make demo` tournaient. Avec SQLAlchemy
+2.0.44 (`uv.lock`), les pas sont créés chaque minute ; `tests/unit/test_compose.py` garde ce choix. L'image
+tournant sous un utilisateur sans droits sur le paquet Prefect, l'interface est copiée au démarrage dans
+`/tmp/prefect/ui` (`PREFECT_UI_STATIC_DIRECTORY`).
+
+**Chaque pas porte le nom de sa semaine simulée** dans Prefect (`2017-01-07 → 2017-01-14`, suffixé « (horloge
+recalée) » si besoin, « fin du rejeu » au bout) au lieu du nom tiré au hasard : la liste des runs se lit comme une
+frise. `make demo-status` montre aussi les derniers pas prévus, démarrés ou non, et la place de concurrence du
+déploiement : un pas en retard ou annulé n'a pas d'heure de début et n'apparaît pas dans « derniers runs ».
+
 ## Vue d'ensemble
 
 ```mermaid

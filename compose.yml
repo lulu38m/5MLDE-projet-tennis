@@ -112,11 +112,17 @@ services:
         condition: service_healthy
 
   prefect:
-    image: prefecthq/prefect:3.8.7-python3.12
-    restart: unless-stopped
+    # Notre image (Prefect 3.8.7 et SQLAlchemy 2.0.44 de uv.lock), pas prefecthq/prefect : cette image-là installe
+    # le dernier SQLAlchemy (2.1), avec lequel le planificateur de Prefect 3.8.7 échoue sur PostgreSQL (« Can't
+    # evaluate bulk DML statement ») : aucun pas planifié n'était créé, seuls ceux de `make demo` tournaient.
+    # Les données sont dans PostgreSQL ; PREFECT_HOME et l'interface (copiée au démarrage) dans /tmp : l'image tourne
+    # sous l'utilisateur app, qui ne peut pas écrire dans le paquet Prefect (sans cela : {"detail":"Not Found"}).
+    <<: *app
+    env_file: []
     command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
     environment:
-      PREFECT_HOME: /var/lib/prefect
+      PREFECT_HOME: /tmp/prefect
+      PREFECT_UI_STATIC_DIRECTORY: /tmp/prefect/ui
       # Backend PostgreSQL : SQLite ne supporte pas les écritures concurrentes des flows et de l'UI.
       PREFECT_SERVER_DATABASE_CONNECTION_URL: "postgresql+asyncpg://prefect:${PREFECT_DB_PASSWORD:-prefect-local}@postgres:5432/prefect"
       PREFECT_SERVER_UI_API_URL: "http://127.0.0.1:${PREFECT_PORT:-4201}/api"

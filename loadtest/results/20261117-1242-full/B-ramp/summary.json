@@ -1,0 +1,38 @@
+{
+  "scenario": {
+    "name": "ramp",
+    "config": "B",
+    "users": "mix",
+    "steps": [
+      10,
+      50,
+      100,
+      200,
+      500,
+      1000
+    ],
+    "step_s": 120.0,
+    "warmup_s": 20.0,
+    "base": null,
+    "factor": 5,
+    "ramp_s": 10,
+    "before_s": 60,
+    "during_s": 90,
+    "after_s": 120,
+    "constant": null,
+    "duration_s": 900
+  },
+  "kind": "ramp",
+  "t0": 1794920295.212,
+  "requests": 60758,
+  "capacity": {
+    "users": 50,
+    "rps": 49.18,
+    "p95_ms": 51.2869999999998,
+    "first_failure": 100
+  },
+  "spike": null,
+  "leak": null,
+  "longest_pause_s": 0.9140000343322754,
+  "interrupted": false
+}

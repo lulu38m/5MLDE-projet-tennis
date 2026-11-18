@@ -3,7 +3,7 @@
 - `setup`  : work pool, déploiements, automations (idempotent ; lancé à chaque `make up` par `orchestration-setup`)
 - `start`  : `make demo` — la simulation planifiée reprend, un premier pas part tout de suite
 - `stop`   : `make demo-stop` — la simulation est mise en pause (un run en cours va jusqu'au bout)
-- `status` : `make demo-status` — déploiements, worker, derniers runs
+- `status` : `make demo-status` — déploiements, worker, pas planifiés de la simulation, derniers runs
 
 Utilise `PREFECT_API_URL` (exporté par le Makefile, ou fixé dans les conteneurs).
 """
@@ -18,7 +18,14 @@ from uuid import UUID
 
 from prefect import get_client
 from prefect.client.orchestration import SyncPrefectClient
-from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
+from prefect.client.schemas.filters import (
+    DeploymentFilter,
+    DeploymentFilterId,
+    DeploymentFilterTags,
+    FlowRunFilter,
+    FlowRunFilterExpectedStartTime,
+    FlowRunFilterStartTime,
+)
 from prefect.client.schemas.sorting import FlowRunSort
 from prefect.exceptions import ObjectNotFound, PrefectHTTPStatusError
 
@@ -30,6 +37,7 @@ SIMULATION = "simulation-atp/planifiee"
 EXIT_OK, EXIT_FAILED = 0, 1
 WORKER_FRESH_S = 60
 RECENT_RUNS = 10
+PLANNED_RUNS = 8
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -90,6 +98,36 @@ def _worker_lines(client: SyncPrefectClient) -> list[str]:
     return [f"attention : aucun worker actif sur {POOL} — les runs attendront (make up, puis make logs)"]
 
 
+def _planned_lines(client: SyncPrefectClient) -> list[str]:
+    """Les derniers pas prévus de la simulation, démarrés ou non.
+
+    Un pas en retard, annulé ou qui attend une place de concurrence n'a pas d'heure de début : il n'apparaît donc pas
+    dans « derniers runs », et c'est justement lui qu'on cherche quand l'horloge ne bouge plus.
+    """
+    try:
+        simulation = client.read_deployment_by_name(SIMULATION)
+    except ObjectNotFound:
+        return []
+    limit = simulation.global_concurrency_limit
+    slots = f", concurrence {limit.active_slots}/{limit.limit} place(s) occupée(s)" if limit else ""
+    lines = [f"pas de la simulation ({'en pause' if simulation.paused else 'actif'}{slots}) :"]
+    runs = client.read_flow_runs(
+        deployment_filter=DeploymentFilter(id=DeploymentFilterId(any_=[simulation.id])),
+        flow_run_filter=FlowRunFilter(
+            expected_start_time=FlowRunFilterExpectedStartTime(before_=datetime.now(UTC)),  # type: ignore[arg-type]
+        ),
+        sort=FlowRunSort.EXPECTED_START_TIME_DESC,
+        limit=PLANNED_RUNS,
+    )
+    for run in runs:
+        planned = run.expected_start_time.astimezone().strftime("%d/%m %H:%M:%S") if run.expected_start_time else "?"
+        origin = "planifié" if run.auto_scheduled else "make demo"
+        lines.append(f"  {planned}  {run.state_name or '?':<24} {origin:<9} {run.name}")
+    if not runs:
+        lines.append("  aucun pas prévu jusqu'ici")
+    return lines
+
+
 def _status(client: SyncPrefectClient) -> list[str]:
     flows: dict[UUID, str] = {}
 
@@ -104,10 +142,12 @@ def _status(client: SyncPrefectClient) -> list[str]:
         name = f"{flow_name(deployment.flow_id)}/{deployment.name}"
         lines.append(f"  {name:<32} {'en pause' if deployment.paused else 'actif'}")
     lines += _worker_lines(client)
-    runs = client.read_flow_runs(sort=FlowRunSort.START_TIME_DESC, limit=RECENT_RUNS)
+    lines += _planned_lines(client)
+    started = FlowRunFilter(start_time=FlowRunFilterStartTime(is_null_=False))  # PostgreSQL trie les NULL en tête
+    runs = client.read_flow_runs(flow_run_filter=started, sort=FlowRunSort.START_TIME_DESC, limit=RECENT_RUNS)
     lines.append("derniers runs :")
     for run in runs:
-        when = run.start_time.astimezone().strftime("%d/%m %H:%M:%S") if run.start_time else "à venir       "
+        when = run.start_time.astimezone().strftime("%d/%m %H:%M:%S") if run.start_time else "?"
         lines.append(f"  {when}  {run.state_name or '?':<10} {flow_name(run.flow_id):<18} {run.name}")
     return lines
 

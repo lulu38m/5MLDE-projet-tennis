@@ -87,3 +87,4 @@ def test_setup_is_idempotent_and_keeps_the_demo_running(capsys: pytest.CaptureFi
     assert main(["status"]) == EXIT_OK
     status = capsys.readouterr().out
     assert "simulation-atp/planifiee" in status and "en pause" in status and "derniers runs" in status
+    assert "pas de la simulation (en pause, concurrence 0/1 place(s) occupée(s))" in status

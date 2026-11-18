@@ -1,0 +1,31 @@
+# Tests de charge (phase 10) : `make load` (campagne courte) et `make load-full` (campagne complète).
+# Un « utilisateur » Locust envoie une requête puis attend 0,5 à 1,5 s : environ une requête par seconde.
+
+slo:
+  p95_ms: 200          # un palier est tenu si 95 % des requêtes unitaires répondent en moins de 200 ms,
+  batch_p95_ms: 1000   # 95 % des batchs de 50 matchs en moins d'1 s,
+  error_rate: 0.01     # et si moins de 1 % des requêtes échouent (code HTTP hors 2xx, délai dépassé)
+
+locust:
+  processes: 4         # processus Locust (sur la même machine que la stack : leur CPU est mesuré à part)
+  timeout_s: 10        # une requête sans réponse après 10 s compte comme une erreur
+  players: 200         # joueurs tirés au hasard pour composer les matchs (GET /players)
+
+# Les configurations comparées : surcharges de compose.yml pour le service api (loadtest/compose.<nom>.yml).
+configs:
+  A: "1 réplica · 0,5 CPU · 512 Mo · 1 worker uvicorn"
+  B: "1 réplica · 1 CPU · 1,5 Go · 2 workers uvicorn"
+  C: "2 réplicas de B derrière nginx (2 CPU)"
+
+campaigns:
+  quick:               # make load : ~5 min, config B
+    - {name: ramp, config: B, users: mix, steps: [10, 50, 100, 200], step_s: 45, warmup_s: 15}
+    - {name: spike, config: B, users: mix, base: 20, factor: 5, ramp_s: 10, before_s: 30, during_s: 45, after_s: 60}
+  full:                # make load-full : ~75 min (endurance : à une charge que B tient, la rampe B le montre)
+    - {name: ramp, config: A, users: mix, steps: [10, 50, 100, 200, 500, 1000], step_s: 120, warmup_s: 20}
+    - {name: ramp, config: B, users: mix, steps: [10, 50, 100, 200, 500, 1000], step_s: 120, warmup_s: 20}
+    - {name: ramp, config: C, users: mix, steps: [10, 50, 100, 200, 500, 1000], step_s: 120, warmup_s: 20}
+    - {name: ramp-predict, config: B, users: predict, steps: [10, 50, 100, 200, 500], step_s: 60, warmup_s: 15}
+    - {name: ramp-batch, config: B, users: batch, steps: [1, 5, 10, 20, 50], step_s: 60, warmup_s: 15}
+    - {name: spike, config: B, users: mix, base: 50, factor: 5, ramp_s: 10, before_s: 60, during_s: 90, after_s: 120}
+    - {name: endurance, config: B, users: mix, constant: 50, duration_s: 900, warmup_s: 60}

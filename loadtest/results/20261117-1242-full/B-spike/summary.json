@@ -1,0 +1,32 @@
+{
+  "scenario": {
+    "name": "spike",
+    "config": "B",
+    "users": "mix",
+    "steps": null,
+    "step_s": 120,
+    "warmup_s": 20,
+    "base": 50,
+    "factor": 5.0,
+    "ramp_s": 10.0,
+    "before_s": 60.0,
+    "during_s": 90.0,
+    "after_s": 120.0,
+    "constant": null,
+    "duration_s": 900
+  },
+  "kind": "spike",
+  "t0": 1794918234.477,
+  "requests": 20247,
+  "capacity": null,
+  "spike": {
+    "base_p95_ms": 80.22299999999963,
+    "peak_p95_ms": 2030.0025,
+    "peak_error_rate": 0.0,
+    "after_p95_ms": 994.9459999999985,
+    "recovery_s": 60.0
+  },
+  "leak": null,
+  "longest_pause_s": 0.49200010299682617,
+  "interrupted": false
+}

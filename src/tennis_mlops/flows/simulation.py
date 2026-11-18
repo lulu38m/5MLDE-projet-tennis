@@ -28,16 +28,22 @@ from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
-from prefect import flow, get_run_logger, task
+import httpx
+from prefect import flow, get_client, get_run_logger, task
 from prefect.cache_policies import NO_CACHE
+from prefect.exceptions import PrefectException
+from prefect.runtime import flow_run
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 
 from tennis_mlops.config import DEFAULT_CONFIG_PATH, ProjectConfig, Settings
 from tennis_mlops.data.errors import SourceUnavailableError
 from tennis_mlops.flows.feedback import feedback_flow
 from tennis_mlops.flows.ingest import DEGRADED_STATE, IngestionReport, ingest_flow
 from tennis_mlops.flows.scoring import scoring_flow
+from tennis_mlops.ingestion.store import IngestionStore
 from tennis_mlops.orchestration.clock import ClockStep, ReplayFinishedError, SimulationClock
 
 FLOW_NAME = "simulation-atp"
@@ -47,6 +53,7 @@ class SimulationReport(BaseModel):
     """Bilan d'un pas de simulation."""
 
     days: int
+    caught_up: date | None = None  # l'horloge de la source était en retard sur la base (redémarrée) et repartait d'ici
     previous: date | None = None
     now: date | None = None
     new_matches: int = 0
@@ -63,6 +70,8 @@ class SimulationReport(BaseModel):
         if self.finished:
             return f"fin du rejeu : {self.detail}"
         clock = f"{self.previous} → {self.now}, {self.new_matches} match(s) terminé(s)" if self.now else self.detail
+        if self.caught_up:
+            clock = f"horloge recalée depuis {self.caught_up}, {clock}"
         ingestion = f"ingestion {self.ingestion}" + (f" ({self.ingestion_summary})" if self.ingestion_summary else "")
         return f"pas de {self.days} jour(s) : {clock} ; {ingestion} ; feedback : {self.feedback} ; " + (
             f"scoring : {self.scoring}"
@@ -78,6 +87,24 @@ def default_clock(settings: Settings, config: ProjectConfig) -> SimulationClock:
 
 
 clock_factory: ClockFactory = default_clock  # remplacé dans les tests
+
+
+def default_store(settings: Settings) -> IngestionStore:
+    """La base du projet (pour le watermark de l'ingestion)."""
+    return IngestionStore.from_url(settings.sqlalchemy_url())
+
+
+store_factory: Callable[[Settings], IngestionStore] = default_store  # remplacé dans les tests
+
+
+@task(name="GET /admin/clock", task_run_name="recaler l'horloge sur le {watermark}", cache_policy=NO_CACHE)
+def catch_up_clock(clock: SimulationClock, watermark: date) -> date | None:
+    """Remet l'horloge de la source au watermark si elle est en retard (source redémarrée)."""
+    behind = clock.catch_up(watermark)
+    if behind is not None:
+        get_run_logger().warning("horloge de la source en retard (redémarrée ?) : %s → %s, date jusqu'à laquelle "
+                                 "la base est ingérée", behind, watermark)  # fmt: skip
+    return behind
 
 
 @task(name="POST /admin/clock/advance", task_run_name="avancer de {days} jour(s)", cache_policy=NO_CACHE)
@@ -96,8 +123,14 @@ def simulation_flow(days: int | None = None, config_path: str | None = None) -> 
     days = days or config.orchestration.simulation_days_per_run
     logger = get_run_logger()
     report = SimulationReport(days=days)
-    clock = clock_factory(Settings(), config)
+    settings = Settings()
+    clock = clock_factory(settings, config)
     try:
+        try:
+            watermark = store_factory(settings).watermark(default=config.simulation.bootstrap_start)
+            report.caught_up = catch_up_clock(clock, watermark)
+        except (SQLAlchemyError, SourceUnavailableError) as exc:  # l'avance ou l'ingestion diront la panne
+            logger.warning("horloge non recalée : %s", exc)
         step = advance_clock(clock, days)
         report.previous, report.now = step.previous, step.now
         report.new_matches, report.tournaments = step.new_matches, step.tournaments
@@ -110,6 +143,7 @@ def simulation_flow(days: int | None = None, config_path: str | None = None) -> 
         logger.warning("%s : l'ingestion constatera la panne", report.detail)
     finally:
         clock.close()
+        name_run(report)
     state = ingest_flow(str(path), return_state=True)
     report.ingestion = state.name or state.type.value
     result: Any = state.result(raise_on_failure=False)
@@ -124,6 +158,27 @@ def simulation_flow(days: int | None = None, config_path: str | None = None) -> 
         report.scoring = _outcome(scoring_flow(config_path=str(path), return_state=True))
     logger.info(report.summary())
     return report
+
+
+def run_name(report: SimulationReport) -> str:
+    """Le nom du run dans Prefect : la semaine simulée (`2017-01-07 → 2017-01-14`), lisible comme une frise."""
+    if report.finished:
+        return "fin du rejeu"
+    if report.now is None:
+        return "horloge non avancée"
+    return f"{report.previous} → {report.now}" + (" (horloge recalée)" if report.caught_up else "")
+
+
+def name_run(report: SimulationReport) -> None:
+    """Renomme le run en cours (le nom au hasard de Prefect ne dit rien) ; sans effet hors d'un run, jamais bloquant."""
+    run_id = flow_run.get_id()
+    if run_id is None:
+        return
+    try:
+        with get_client(sync_client=True) as client:
+            client.update_flow_run(UUID(run_id), name=run_name(report))
+    except (PrefectException, httpx.HTTPError, OSError) as exc:  # le pas compte plus que son nom
+        get_run_logger().warning("run non renommé : %s", exc)
 
 
 def _outcome(state: Any) -> str:  # noqa: ANN401

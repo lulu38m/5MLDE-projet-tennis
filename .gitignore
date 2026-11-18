@@ -29,7 +29,9 @@ mlruns/
 mlartifacts/
 mlflow.db
 state/
-loadtest/results/*.csv
+# Campagnes de charge : on versionne les résultats (CSV, graphiques, rapport), pas le journal brut des requêtes
+!loadtest/results/**/*.csv
+loadtest/results/**/raw/
 
 # Document de pilotage personnel (non versionné)
 PLAN.md

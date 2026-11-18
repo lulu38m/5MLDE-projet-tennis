@@ -8,7 +8,8 @@
         demo demo-stop demo-status simulate alerts \
         api api-status predict predictions score feedback \
         ui ui-open ui-smoke \
-        dashboards grafana grafana-check prometheus
+        dashboards grafana grafana-check prometheus \
+        load load-full load-ui
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -248,3 +249,16 @@ grafana-check: ## Vérifie Prometheus, Grafana, et chaque requête de chaque das
 
 prometheus: ## Ouvre Prometheus sur l'état de ses cibles
 	$(UV) python -m webbrowser -t "$(PROMETHEUS_URL)/targets"
+
+# --------------------------------------------------------------------------- charge (phase 10)
+
+LOAD := TENNIS_API_URL=$(API_URL) TENNIS_PROMETHEUS_URL=$(PROMETHEUS_URL) $(UV) python -m loadtest.run_campaign
+
+load: ## Campagne de charge courte (~6 min, config B) : rapport, CSV et graphiques dans loadtest/results/
+	$(LOAD) quick
+
+load-full: ## Campagne complète (~75 min) : configs A, B, C, rampe 10 → 1 000 utilisateurs, pic, endurance
+	$(LOAD) full
+
+load-ui: ## Locust avec son interface web (http://127.0.0.1:8089), charge choisie à la main
+	PYTHONPATH=. $(UV) locust -f loadtest/locustfile.py --host $(API_URL) --web-host 127.0.0.1

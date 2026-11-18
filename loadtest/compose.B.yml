@@ -1,0 +1,12 @@
+# Configuration B (phase 10) : 1 réplica, 1 CPU, 2 workers uvicorn. Chaque worker charge son modèle et rejoue
+# l'historique : la mémoire passe à 1,5 Go pour deux.
+# Avec plusieurs workers, /metrics ne montre que celui qui répond à Prometheus (pas de mode multiprocessus) :
+# les mesures de la campagne viennent de Locust et des conteneurs, pas de /metrics.
+services:
+  api:
+    command: ["python", "-m", "tennis_mlops.api", "serve", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1536m

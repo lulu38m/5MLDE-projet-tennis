@@ -7,7 +7,7 @@ qualité, le réentraînement, la mise en service et la supervision.
 ## Lancer le projet, de zéro
 
 Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien. Compter **une demi-heure** en tout, dont l'essentiel
-à attendre. Testé sur macOS (Apple Silicon) ; les mêmes commandes valent pour Linux et pour Windows sous WSL2.
+à attendre. Mêmes commandes sous macOS, Linux et Windows (dans WSL2, voir l'étape 1).
 
 ### 1. Installer les outils (une seule fois)
 
@@ -17,8 +17,18 @@ Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien. Compter **une d
 | **uv** | installe Python 3.12 et les dépendances verrouillées | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | **git**, **make** | récupérer le code, lancer les commandes | macOS : `xcode-select --install` · Linux : `sudo apt install git make` |
 
-Windows : tout se fait dans **WSL2** (Ubuntu), avec Docker Desktop réglé sur « Use the WSL 2 based engine » ; cloner le
-dépôt dans le système de fichiers Linux (`~/…`), pas dans `C:\`.
+**Windows** : tout se fait dans **WSL2**, jamais dans PowerShell ni dans `C:\` :
+
+1. PowerShell en administrateur : `wsl --install -d Ubuntu`, redémarrer, ouvrir « Ubuntu » et créer l'utilisateur ;
+2. Docker Desktop → Settings → General : « Use the WSL 2 based engine » ; Resources → WSL integration : activer
+   **Ubuntu**. La mémoire de Docker est alors celle de WSL2, la moitié de la RAM du PC par défaut : 16 Go de RAM
+   suffisent ;
+3. dans le terminal Ubuntu : `sudo apt update && sudo apt install -y git make curl`, puis la commande d'uv ci-dessus ;
+4. cloner **dans Ubuntu** (`cd ~ && git clone …`) : sous `/mnt/c/…`, les fins de ligne et les droits des fichiers
+   cassent le Makefile et les montages de Docker ;
+5. les adresses (`http://127.0.0.1:…`) s'ouvrent dans le navigateur de Windows ; `make ui-open` et
+   `make scenarios-report` n'ouvrent rien depuis WSL : copier l'adresse, ou
+   `explorer.exe "$(wslpath -w state/acceptance/rapport.html)"` pour le rapport.
 
 Vérifier que tout répond, Docker Desktop **ouvert** :
 

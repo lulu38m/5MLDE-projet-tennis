@@ -38,6 +38,10 @@ export MLFLOW_DISABLE_AGENT_HINT := 1
 # Nom du poste affiché dans les cartes Teams (le service d'alertes tourne dans Docker : il ne le connaît pas).
 TENNIS_ALERT_HOST ?= $(shell hostname)
 export TENNIS_ALERT_HOST
+# Utilisateur de la machine hôte : le worker de la stack écrit dans ./state sous la même identité (compose.yml).
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
+export HOST_UID HOST_GID
 # Révision du code gravée dans l'image : les campagnes lancées par le worker la tracent dans MLflow.
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 export GIT_COMMIT
@@ -92,6 +96,7 @@ data-lock: ## (Mainteneurs) Résout les révisions actuelles des sources et rég
 	@echo ".env créé depuis .env.example (rien à remplir pour la démo)"
 
 up: .env data ## Construit et démarre la stack, puis un premier modèle entraîné par la chaîne et servi par l'API
+	@mkdir -p state  # créé par l'hôte : sinon Docker le crée au nom de root (Linux, WSL2) et l'ingestion ne peut y écrire
 	docker compose up -d --build --wait
 	$(UV) python -m tennis_mlops.acceptance bootstrap
 

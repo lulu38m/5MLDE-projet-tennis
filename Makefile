@@ -9,7 +9,8 @@
         api api-status predict predictions score feedback \
         ui ui-open ui-smoke \
         dashboards grafana grafana-check prometheus \
-        load load-full load-ui
+        load load-full load-ui \
+        reset scenarios scenarios-report
 
 UV := uv run --locked
 MOCK_URL ?= http://127.0.0.1:8001
@@ -37,13 +38,17 @@ export MLFLOW_DISABLE_AGENT_HINT := 1
 # Nom du poste affiché dans les cartes Teams (le service d'alertes tourne dans Docker : il ne le connaît pas).
 TENNIS_ALERT_HOST ?= $(shell hostname)
 export TENNIS_ALERT_HOST
+# Utilisateur de la machine hôte : le worker de la stack écrit dans ./state sous la même identité (compose.yml).
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
+export HOST_UID HOST_GID
 # Révision du code gravée dans l'image : les campagnes lancées par le worker la tracent dans MLflow.
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 export GIT_COMMIT
 GX_DOCS := state/gx/gx/uncommitted/data_docs/local_site/index.html
 
 help: ## Affiche cette aide
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}'
 
 # --------------------------------------------------------------------------- qualité
 
@@ -83,11 +88,16 @@ data-lock: ## (Mainteneurs) Résout les révisions actuelles des sources et rég
 
 # --------------------------------------------------------------------------- stack Docker
 
-up: data ## Construit et démarre la stack (attend que les services soient sains)
-	docker compose up -d --build --wait
+# Le parcours correcteur est écrit en Python (src/tennis_mlops/cli.py) pour marcher aussi sous Windows sans make :
+# `make up` et `uv run tennis up` font exactement la même chose (.env créé s'il manque, données, stack, 1er modèle).
+up: ## Construit et démarre la stack, puis un premier modèle entraîné par la chaîne et servi par l'API
+	$(UV) tennis up
 
 down: ## Arrête la stack (les volumes sont conservés)
 	docker compose down
+
+reset: ## Remise à zéro : stack arrêtée, volumes supprimés (bases, MLflow, Grafana) et état local effacé ; garde data/raw
+	$(UV) tennis reset
 
 logs: ## Suit les logs de la stack
 	docker compose logs -f --tail=100
@@ -95,17 +105,8 @@ logs: ## Suit les logs de la stack
 ps: ## État des services
 	docker compose ps
 
-urls: ## Adresses des interfaces de la stack
-	@echo "mock_source (docs API) : http://127.0.0.1:8001/docs"
-	@echo "Prefect (UI)           : http://127.0.0.1:4201"
-	@echo "MLflow (UI)            : http://127.0.0.1:7282"
-	@echo "Service d'alertes      : http://127.0.0.1:8090/docs  (make alerts)"
-	@echo "API de prédiction      : $(API_URL)/docs  (make api-status, make predict)"
-	@echo "Interface de test      : $(UI_URL)  (make ui-open)"
-	@echo "Grafana (dashboards)   : $(GRAFANA_URL)  (make grafana ; admin pour modifier)"
-	@echo "Prometheus             : $(PROMETHEUS_URL)/targets  (make prometheus)"
-	@echo "PostgreSQL             : 127.0.0.1:5433  base tennis  (make db)"
-	@echo "Great Expectations     : $(GX_DOCS)  (make gx-docs)"
+urls: ## Adresses des interfaces, identifiants de démo, et si elles répondent
+	@$(UV) tennis urls
 
 # --------------------------------------------------------------------------- mock_source
 
@@ -168,7 +169,7 @@ alerts: ## Dernières alertes et ce qu'elles sont devenues (envoyée, filtrée, 
 # --------------------------------------------------------------------------- orchestration (phase 6)
 
 demo: up ## Chaîne automatique : +7 jours simulés chaque minute, ingestion, réentraînement sur événement, alertes
-	$(UV) python -m tennis_mlops.orchestration start
+	$(UV) tennis demo
 
 demo-stop: ## Met la simulation planifiée en pause (le run en cours se termine)
 	$(UV) python -m tennis_mlops.orchestration stop
@@ -262,3 +263,15 @@ load-full: ## Campagne complète (~75 min) : configs A, B, C, rampe 10 → 1 000
 
 load-ui: ## Locust avec son interface web (http://127.0.0.1:8089), charge choisie à la main
 	PYTHONPATH=. $(UV) locust -f loadtest/locustfile.py --host $(API_URL) --web-host 127.0.0.1
+
+# --------------------------------------------------------------------------- tests d'acceptation (phase 11)
+
+ONLY ?=
+TEAMS ?=
+FORCE ?=
+
+scenarios: ## Tests d'acceptation S1 → S9 sur la stack de `make up` (~10 min) ; `ONLY=S2,S5`, `TEAMS=1`, rapport HTML
+	$(UV) tennis scenarios $(if $(ONLY),--only $(ONLY)) $(if $(TEAMS),--teams) $(if $(FORCE),--force)
+
+scenarios-report: ## Ouvre le rapport du dernier `make scenarios`
+	$(UV) tennis report

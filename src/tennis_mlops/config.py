@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     # `make grafana-check` depuis la machine hôte.
     prometheus_url: HttpUrl = HttpUrl("http://127.0.0.1:9091")
     grafana_admin_password: SecretStr = SecretStr("admin-local")
+    # Phase 11 : l'interface de test vue depuis la machine hôte (`make scenarios`, S9 ; `make urls`).
+    ui_url: HttpUrl = HttpUrl("http://127.0.0.1:8501")
 
     def alert_origin(self) -> str:
         """Le poste qui envoie : `TENNIS_ALERT_HOST` (le Makefile y met le nom du Mac), sinon le nom de la machine."""

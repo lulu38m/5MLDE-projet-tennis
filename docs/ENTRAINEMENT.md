@@ -9,7 +9,7 @@ l'enregistre dans le registre MLflow et décide s'il passe en production (règle
 
 ```sh
 make up          # mock_source, PostgreSQL, Prefect (http://127.0.0.1:4201), MLflow (http://127.0.0.1:7282)
-make ingest      # il faut des matchs en base : au minimum l'amorçage 2010 → 2014
+make ingest      # il faut des matchs en base : au minimum l'amorçage 2010 → 2015 (fait par `make up`)
 make train       # une campagne, 4 candidats à la fois (configs/train.yaml) ; `make train WORKERS=8`
 make train-seq   # la même, un candidat à la fois : la référence pour mesurer le parallélisme
 make mlflow      # ouvre l'interface MLflow (onglet « Model training » → Runs)

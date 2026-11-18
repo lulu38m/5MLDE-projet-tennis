@@ -28,7 +28,7 @@ PROM = {"type": "prometheus", "uid": "prometheus"}
 PG = {"type": "grafana-postgresql-datasource", "uid": "tennis-pg"}
 OUT = Path("infra/grafana/dashboards")
 SCHEMA_VERSION = 41
-SIMULATED_RANGE = {"from": "2015-01-01T00:00:00.000Z", "to": "2026-06-01T00:00:00.000Z"}
+SIMULATED_RANGE = {"from": "2016-01-01T00:00:00.000Z", "to": "2026-06-01T00:00:00.000Z"}
 GREEN, ORANGE, RED, BLUE = "green", "orange", "red", "blue"
 Json = dict[str, Any]
 

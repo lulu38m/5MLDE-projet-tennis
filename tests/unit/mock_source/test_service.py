@@ -27,7 +27,7 @@ def make_project(tmp_path: Path, dataset: tuple[Path, DatasetCatalog, DataLock])
         ("first_match_year: 2010", "first_match_year: 2019"),
         ("last_match_year: 2026", "last_match_year: 2020"),
         ("bootstrap_start: 2010-01-01", "bootstrap_start: 2019-01-01"),
-        ("replay_start: 2015-01-01", "replay_start: 2019-01-05"),
+        ("replay_start: 2016-01-01", "replay_start: 2019-01-05"),
         ("replay_end: 2026-05-31", "replay_end: 2020-12-31"),
     ]:
         text = text.replace(old, new)

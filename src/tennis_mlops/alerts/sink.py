@@ -18,6 +18,9 @@ registre (rollback, promotion)                 ─► POST /registry ─┼─�
   entre-temps). Le canal Teams est partagé avec la classe.
 - **Jamais bloquant** : une lecture qui échoue donne une carte moins riche, pas d'erreur ; l'URL du webhook n'est
   jamais écrite.
+- **Mode silence** (`POST /silence`, posé par `make scenarios`) : pendant les tests d'acceptation, les cartes sont
+  construites et gardées dans l'historique (statut `silenced`) mais rien ne part sur Teams. Il s'arrête de lui-même
+  à l'heure dite, ou par `DELETE /silence`.
 
 Lancement : service `alert_sink` de la stack (`python -m tennis_mlops.alerts serve`).
 """
@@ -26,12 +29,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from tennis_mlops.alerts.builders import (
@@ -58,7 +61,8 @@ from tennis_mlops.validation.suites import SUITES_VERSION
 
 logger = logging.getLogger(__name__)
 
-FILTERED, DUPLICATE, IGNORED, REPEATED = "filtered", "duplicate", "ignored", "repeated"
+FILTERED, DUPLICATE, IGNORED, REPEATED, SILENCED = "filtered", "duplicate", "ignored", "repeated", "silenced"
+MAX_SILENCE_MIN = 240
 SEVERITY = {Tone.FAILURE: Severity.FAILURE, Tone.WARNING: Severity.WARNING, Tone.SUCCESS: Severity.SUCCESS,
             Tone.INFO: Severity.INFO}  # fmt: skip
 REGISTRY_KINDS = {"rollback": AlertKind.ROLLBACK, "promotion": AlertKind.PROMOTION,
@@ -77,10 +81,29 @@ class PrefectHook(BaseModel):
 class Outcome(BaseModel):
     """Ce que le service a fait d'un événement."""
 
-    status: str  # sent, disabled, failed, filtered, repeated, duplicate, ignored
+    status: str  # sent, disabled, failed, filtered, repeated, silenced, duplicate, ignored
     kind: str | None = None
     title: str | None = None
     detail: str = ""
+
+
+class SilenceRequest(BaseModel):
+    """Corps de `POST /silence`."""
+
+    minutes: int = Field(default=60, ge=1, le=MAX_SILENCE_MIN)
+    reason: str = Field(default="tests d'acceptation", max_length=120)
+
+
+class SilenceState(BaseModel):
+    """Le mode silence : actif jusqu'à quand, et pourquoi."""
+
+    active: bool
+    until: datetime | None = None
+    reason: str = ""
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class CampaignFinder(Protocol):
@@ -104,6 +127,33 @@ class AlertService:
     campaigns: CampaignFinder | None = None
     suite: str = SUITES_VERSION
     cooldown: timedelta = timedelta(minutes=30)  # même incident déjà signalé : pas de nouvelle carte avant ce délai
+    clock: Callable[[], datetime] = field(default=_utcnow)
+    _silenced_until: datetime | None = field(default=None, init=False)
+    _silence_reason: str = field(default="", init=False)
+
+    # ------------------------------------------------------------------ mode silence
+
+    def silence(self, request: SilenceRequest) -> SilenceState:
+        """Plus aucune carte ne part sur Teams pendant `minutes` (elles restent dans l'historique)."""
+        self._silenced_until = self.clock() + timedelta(minutes=request.minutes)
+        self._silence_reason = request.reason.strip() or "sans raison"
+        logger.info("mode silence jusqu'à %s : %s", self._silenced_until.isoformat(), self._silence_reason)
+        return self.silence_state()
+
+    def unsilence(self) -> SilenceState:
+        """Les cartes repartent normalement."""
+        if self._silenced_until is not None:
+            logger.info("fin du mode silence")
+        self._silenced_until, self._silence_reason = None, ""
+        return self.silence_state()
+
+    def silence_state(self) -> SilenceState:
+        """Actif ou non ; un silence échu est levé ici."""
+        if self._silenced_until is not None and self.clock() >= self._silenced_until:
+            self._silenced_until, self._silence_reason = None, ""
+        if self._silenced_until is None:
+            return SilenceState(active=False)
+        return SilenceState(active=True, until=self._silenced_until, reason=self._silence_reason)
 
     # ------------------------------------------------------------------ entrées
 
@@ -226,8 +276,12 @@ class AlertService:
         signature: str,
         model_version: str | None = None,
     ) -> Outcome:
+        silence = self.silence_state()
         if kind.value not in self.teams_events:
             status, detail = FILTERED, f"« {kind.value} » absent de orchestration.teams_events"
+        elif silence.active and silence.until is not None:
+            until = silence.until.astimezone(DISPLAY_ZONE).strftime("%H:%M")
+            status, detail = SILENCED, f"mode silence jusqu'à {until} ({silence.reason}) : carte gardée, non envoyée"
         elif (sent_at := self._already_sent(signature)) is not None:
             when = sent_at.astimezone(DISPLAY_ZONE).strftime("%H:%M")
             status, detail = (
@@ -296,8 +350,19 @@ def create_app(service: AlertService) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        """Le service répond ; Teams configuré ou non, et quels types partent."""
-        return {"status": "ok", "teams": service.notifier.enabled, "teams_events": sorted(service.teams_events)}
+        """Le service répond ; Teams configuré ou non, quels types partent, mode silence."""
+        return {"status": "ok", "teams": service.notifier.enabled, "teams_events": sorted(service.teams_events),
+                "silence": service.silence_state().model_dump(mode="json")}  # fmt: skip
+
+    @app.post("/silence")
+    def silence(request: SilenceRequest) -> SilenceState:
+        """Mode silence (tests d'acceptation) : les cartes sont gardées, rien ne part sur Teams."""
+        return service.silence(request)
+
+    @app.delete("/silence")
+    def unsilence() -> SilenceState:
+        """Fin du mode silence."""
+        return service.unsilence()
 
     @app.post("/prefect")
     def prefect(hook: PrefectHook) -> Outcome:

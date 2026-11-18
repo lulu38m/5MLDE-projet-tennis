@@ -21,7 +21,7 @@ service refuse de démarrer, avec un message explicite, si les données sont abs
 illisibles par l'utilisateur non-root du conteneur (uid 10001). Dans ce dernier cas, `make data` rétablit les droits
 de lecture (fichiers créés en mode 600 par certains outils).
 
-Variables (`.env` ou environnement) : `MOCK_START_DATE` (défaut : `simulation.replay_start` = 2015-01-01),
+Variables (`.env` ou environnement) : `MOCK_START_DATE` (défaut : `simulation.replay_start` = 2016-01-01),
 `MOCK_SPEED` (jours simulés par minute réelle, défaut 0 = horloge arrêtée), `MOCK_PORT`.
 
 ## Endpoints
@@ -98,7 +98,7 @@ docker compose stop mock_source  # source totalement indisponible → fallback /
 ## Garanties testées
 
 `tests/unit/mock_source/test_no_future_leak.py` règle l'horloge jour par jour sur un mini-dataset, puis à 30 dates
-de 2015 à 2026 sur les vraies données, et vérifie à chaque fois qu'aucune réponse ne contient de résultat futur,
+de 2016 à 2026 sur les vraies données, et vérifie à chaque fois qu'aucune réponse ne contient de résultat futur,
 de joueur déjà éliminé annoncé au tour suivant, ni de classement postérieur à l'horloge.
 
 Contrôle complémentaire sur les 46 964 matchs réels : `known_date <= match_date` partout, aucun joueur avec deux

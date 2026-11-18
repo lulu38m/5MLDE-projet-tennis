@@ -278,8 +278,16 @@ services:
     <<: *app
     command: ["prefect", "worker", "start", "--pool", "tennis-pool", "--type", "process", "--name", "tennis-worker",
               "--limit", "3", "--with-healthcheck"]
+    # Même identité que l'utilisateur de la machine hôte (HOST_UID / HOST_GID, posés par le Makefile) : le worker et
+    # `make ingest` écrivent dans le même ./state. Sous Linux et WSL2, les droits du dossier monté sont ceux du
+    # disque : avec l'utilisateur de l'image (10001), le worker ne pourrait pas écrire dans les dossiers créés par
+    # l'hôte, ni l'hôte dans les siens. HOME et PREFECT_HOME dans /tmp : cet utilisateur n'a pas de dossier personnel.
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
     environment:
       <<: *internal
+      HOME: /tmp/worker
+      PREFECT_HOME: /tmp/worker/.prefect
+      USER: tennis
     volumes:
       - ./state:/app/state
     depends_on:

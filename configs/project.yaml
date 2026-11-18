@@ -20,7 +20,9 @@ data:
 
 simulation:
   bootstrap_start: 2010-01-01   # historique disponible dès le départ
-  replay_start: 2015-01-01      # début du rejeu : le temps simulé avance à partir d'ici
+  replay_start: 2016-01-01      # début du rejeu : le temps simulé avance à partir d'ici. 2010 → 2015 en historique :
+                                # sur 2010 → 2014 seulement, le premier modèle ne bat pas « le mieux classé gagne »
+                                # (accuracy 68,9 % contre 69,3 %) et la règle de mise en service le refuse
   replay_end: 2026-05-31        # dernier tournoi disponible dans la source
 
 mock_source:

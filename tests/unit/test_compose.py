@@ -27,3 +27,14 @@ def test_prefect_server_runs_the_locked_dependencies() -> None:
     assert _locked("prefect") == "3.8.7"
     assert _locked("sqlalchemy").startswith("2.0.")
     assert _locked("asyncpg")  # pilote du backend PostgreSQL de Prefect
+
+
+def test_the_worker_writes_state_as_the_host_user() -> None:
+    """Sous Linux et WSL2, ./state garde les droits du disque : le worker doit écrire sous la même identité que
+    `make ingest` lancé depuis l'hôte (sinon PermissionError dans state/gx dès le premier pas de `make demo`)."""
+    worker = COMPOSE["services"]["worker"]
+    assert worker["user"] == "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    assert "./state:/app/state" in worker["volumes"]
+    assert worker["environment"]["PREFECT_HOME"].startswith("/tmp/")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "export HOST_UID HOST_GID" in makefile  # make load relance la stack : même identité

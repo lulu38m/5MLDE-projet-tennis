@@ -4,19 +4,118 @@ Chaîne MLOps complète qui prédit la probabilité de victoire d'un joueur dans
 sont rejoués dans le temps par une API simulée, ce qui permet de démontrer l'ingestion continue, les contrôles
 qualité, le réentraînement, la mise en service et la supervision.
 
-## Prérequis
+## Lancer le projet, de zéro
 
-- [uv](https://docs.astral.sh/uv/) ≥ 0.11 (installe Python 3.12 automatiquement)
-- `make`, `git`
-- Docker Desktop (Docker Compose v2)
+Un fil à suivre dans l'ordre, sur un poste qui n'a encore rien : **les mêmes commandes sous macOS, Linux et Windows**
+(dans PowerShell, sans WSL ni `make`). Compter une demi-heure en tout, dont l'essentiel à attendre.
 
-## Installation
+### 1. Installer trois outils (une seule fois)
+
+| Outil | Pourquoi | macOS / Linux | Windows |
+|---|---|---|---|
+| **Docker Desktop** | toute la stack tourne dans des conteneurs | [docker.com](https://www.docker.com/products/docker-desktop/) | [docker.com](https://www.docker.com/products/docker-desktop/) (il installe WSL2 lui-même) |
+| **uv** | installe Python 3.12 et les dépendances verrouillées | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| **git** | récupérer le code | macOS : `xcode-select --install` · Linux : `sudo apt install git` | [git-scm.com](https://git-scm.com/download/win) |
+
+Docker Desktop doit avoir **8 Go de mémoire** (macOS : Réglages → Resources ; Windows : la moitié de la RAM du PC par
+défaut, donc 16 Go de RAM suffisent). Ouvrir un **nouveau** terminal après les installations, Docker Desktop lancé, et
+vérifier :
+
+```sh
+docker info --format "{{.ServerVersion}}"
+uv --version
+git --version
+```
+
+### 2. Récupérer le code
+
+```sh
+git clone https://github.com/lulu38m/5MLDE-projet-tennis.git
+cd 5MLDE-projet-tennis
+```
+
+Aucune configuration à faire : `.env` est créé depuis `.env.example` au premier lancement, aucun secret n'est
+nécessaire (sans webhook Teams, les alertes restent dans l'historique de `make alerts`).
+
+### 3. Démarrer la stack
+
+```sh
+uv run tennis up
+```
+
+5 à 10 minutes la première fois : téléchargement des données (~45 Mo, vérifiées par SHA-256), construction de l'image,
+démarrage des services, puis **la chaîne entraîne elle-même un premier modèle** (ingestion 2010 → 2015 contrôlée par
+Great Expectations, entraînement déclenché par événement sur le worker Prefect, règle de mise en service). La
+commande se termine par :
+
+```
+modèle en production : v1 (log loss test 0.57146, données jusqu'au 2015-11-29), servi par l'API
+```
+
+### 4. Regarder
+
+```sh
+uv run tennis urls   # chaque interface, ses identifiants de démo, ● si elle répond
+```
+
+| Interface | Adresse | Ce qu'on y voit |
+|---|---|---|
+| Interface de test | http://127.0.0.1:8501 | prédire un match, fiches joueurs, face-à-face, matchs à venir |
+| Prefect | http://127.0.0.1:4201 | les flows (ingestion, entraînement, simulation) et leurs tasks |
+| MLflow | http://127.0.0.1:7282 | les campagnes, leurs candidats, le registre `atp-winner` et ses alias |
+| Grafana | http://127.0.0.1:3001 | dashboards technique, métier et croisé (lecture sans compte) |
+| API | http://127.0.0.1:8000/docs | `POST /predict`, `GET /model`… |
+
+### 5. Vérifier toute la chaîne : les tests d'acceptation
+
+```sh
+uv run tennis scenarios   # S1 → S9, environ 10 minutes, une ligne ✅ par vérification
+uv run tennis report      # le rapport HTML : chaque scénario, chaque vérification, les liens Prefect et MLflow
+```
+
+Ils partent de l'état laissé par `up` (une seule version, horloge au 1er janvier 2016) : les lancer **avant** `demo`.
+Ce que vérifie chaque scénario : [`docs/ACCEPTATION.md`](docs/ACCEPTATION.md).
+
+### 6. Laisser la chaîne tourner seule
+
+```sh
+uv run tennis demo        # une semaine simulée par minute : ingestion, scoring, feedback, réentraînement, alertes
+uv run tennis demo-stop   # pause (le pas en cours va au bout)
+```
+
+Suivre dans Prefect (les pas de `simulation-atp`), MLflow (les nouvelles versions) et Grafana (le dashboard métier).
+
+### 7. Arrêter, ou repartir de zéro
+
+```sh
+uv run tennis down    # arrête la stack, garde les données (up la relance telle quelle)
+uv run tennis reset   # efface tout (bases, MLflow, Grafana, état local) sauf les données téléchargées
+```
+
+Après `reset`, `up` puis `scenarios` rejouent exactement le même parcours.
+
+Sous macOS et Linux, `make up`, `make urls`, `make scenarios`, `make scenarios-report`, `make demo`, `make demo-stop`,
+`make down` et `make reset` font la même chose ; le Makefile donne aussi accès à toutes les autres commandes du projet
+(`make help`).
+
+### En cas de souci
+
+| Symptôme | Cause probable | Que faire |
+|---|---|---|
+| « Docker ne répond pas » | Docker Desktop fermé | l'ouvrir, attendre « Engine running », relancer `uv run tennis up` |
+| `uv` ou `git` introuvable | terminal ouvert avant l'installation | ouvrir un nouveau terminal |
+| `port is already allocated` | un autre programme sur un des ports (8000, 8001, 8090, 8501, 3001, 4201, 5433, 7282, 9091) | l'arrêter, ou changer le port dans `.env` |
+| un service `unhealthy`, conteneur relancé en boucle | mémoire de Docker trop juste | 8 Go dans Docker Desktop, puis `uv run tennis down` et `up` |
+| `scenarios` refuse : « pas dans l'état laissé par make up » | la stack a déjà servi (démo, entraînements) | `uv run tennis reset`, `up`, puis `scenarios` |
+| un scénario ❌ | voir le rapport (`uv run tennis report`) et le run Prefect lié | `docker compose logs <service>` |
+
+## Développer
 
 ```sh
 make setup      # uv sync --locked + hooks pre-commit
 make check      # lint + typage + tests, comme la CI
 make data       # télécharge les données à la version verrouillée (~45 Mo, sans compte ni token)
-make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, API, interface, worker, Prometheus, Grafana… (`make urls`)
+make up         # stack Docker : mock_source, PostgreSQL, Prefect, MLflow, API, interface, worker, Prometheus, Grafana… et le 1er modèle
 make ingest     # un passage d'ingestion contrôlé par Great Expectations, suivi dans Prefect
 make train      # campagne d'entraînement en parallèle, tracée dans MLflow, meilleur modèle enregistré
 make demo       # la chaîne tourne seule : temps simulé, ingestion, réentraînement sur événement, alertes Teams
@@ -38,13 +137,14 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make data-verify` | Revérifie les fichiers locaux contre `configs/data.lock.json` |
 | `make data-profile` | Profile les données → `data/raw/profile.json` |
 | `make data-lock` | (Mainteneurs) Résout les révisions actuelles des sources et régénère le verrou |
-| `make up` / `make down` | Démarre (`--build --wait`) / arrête la stack Docker |
+| `make up` / `make down` | Démarre la stack (`--build --wait`) et garantit un modèle servi / l'arrête (volumes conservés) |
+| `make reset` | Remise à zéro : volumes supprimés, état local effacé (garde `data/raw`) ; `make up` repart de l'état de référence |
 | `make logs` / `make ps` | Logs et état des services |
 | `make mock` | Lance `mock_source` en local, sans Docker |
 | `make clock [DATE=2019-06-01]` | Lit ou règle l'horloge simulée |
 | `make advance DAYS=7` | Fait avancer le temps simulé |
 | `make chaos MODE=503 FAILURES=2` | Incident contrôlé (`off`, `503`, `slow`, `corrupt`, `schema`) |
-| `make urls` | Adresses des interfaces (mock_source, Prefect, MLflow, API, interface, Grafana, Prometheus, PostgreSQL) |
+| `make urls` | Adresses des interfaces, identifiants de démo, et si chacune répond |
 | `make ingest` | Un passage d'ingestion : mock_source → Great Expectations → PostgreSQL |
 | `make lots` | Derniers lots ingérés : statut, volumes, contrôles en échec |
 | `make gx-docs` | Rapports HTML de Great Expectations |
@@ -73,6 +173,7 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make dashboards` | Régénère les JSON des dashboards depuis leur code (`monitoring/dashboards.py`) |
 | `make load` / `make load-full` | Campagne de charge courte (~6 min) / complète (~75 min, configs A, B, C) : rapport, CSV, graphiques |
 | `make load-ui` | Locust avec son interface web (http://127.0.0.1:8089) |
+| `make scenarios [ONLY=S2,S5] [TEAMS=1]` | Tests d'acceptation S1 → S9 sur la stack, rapport HTML (`make scenarios-report`) |
 
 ## Organisation du code
 
@@ -92,10 +193,12 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `src/tennis_mlops/monitoring/` | Exporteur Prometheus de la chaîne, dashboards Grafana en code, `make grafana-check` |
 | `infra/` | Configuration de Prometheus et provisioning de Grafana (sources, dashboards générés) |
 | `loadtest/` | Tests de charge : scénarios Locust, campagne automatisée, configurations A/B/C, résultats |
+| `src/tennis_mlops/acceptance/` | Parcours correcteur : premier modèle au `make up`, tests d'acceptation `make scenarios` |
+| `src/tennis_mlops/cli.py` | `uv run tennis …` : le parcours correcteur sans `make`, identique sous macOS, Linux et Windows |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md`, `CHARGE.md`, `SYNTHESE_OPS.md` (dimensionnement) |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md`, `CHARGE.md`, `SYNTHESE_OPS.md` (dimensionnement), `ACCEPTATION.md` (parcours correcteur, S1 → S9) |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 

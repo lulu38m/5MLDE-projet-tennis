@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from tennis_mlops.alerts.builders import CampaignLink, CardContext, FlowRunInfo, RegistryNotice
-from tennis_mlops.alerts.sink import AlertService, PrefectHook, create_app
+from tennis_mlops.alerts.sink import AlertService, PrefectHook, SilenceRequest, create_app
 from tennis_mlops.alerts.teams import TeamsNotifier
 from tennis_mlops.ingestion.store import IngestionStore
 from tennis_mlops.orchestration.events import EventKind, PipelineEvent, PipelineEvents, Severity
@@ -135,7 +135,13 @@ def test_registry_decisions(tmp_path: Path) -> None:
 def test_http_api(tmp_path: Path) -> None:
     world = World(tmp_path, failed(), teams_events=("echec",))
     client = TestClient(create_app(world.service))
-    assert client.get("/health").json() == {"status": "ok", "teams": True, "teams_events": ["echec"]}
+    silence = {"active": False, "until": None, "reason": ""}
+    assert client.get("/health").json() == {
+        "status": "ok",
+        "teams": True,
+        "teams_events": ["echec"],
+        "silence": silence,
+    }
     raw = '{"event_id": "ev-1", "event": "prefect.flow-run.Failed", "flow_run_id": "prefect.flow-run.' + RUN_ID + '"}'
     response = client.post("/prefect", content=raw, headers={"Content-Type": "application/json"})
     assert response.status_code == 200 and response.json()["status"] == "sent"
@@ -167,3 +173,36 @@ def test_a_persisting_incident_is_not_resent_every_two_minutes(tmp_path: Path) -
 
     world.service.cooldown = timedelta(0)  # alert_cooldown_min: 0 → toujours envoyer
     assert world.service.on_prefect(hook("ev-3")).status == "sent"
+
+
+def test_silence_keeps_the_cards_without_sending_them_then_ends_by_itself(tmp_path: Path) -> None:
+    world = World(tmp_path, failed(), teams_events=("echec", "rollback"))
+    now = [datetime(2026, 11, 18, 10, tzinfo=UTC)]
+    world.service.clock = lambda: now[0]
+    state = world.service.silence(SilenceRequest(minutes=30, reason="make scenarios"))
+    assert state.active and state.until == datetime(2026, 11, 18, 10, 30, tzinfo=UTC)
+
+    outcome = world.service.on_prefect(hook("ev-1"))
+    assert outcome.status == "silenced" and "make scenarios" in outcome.detail and "11:30" in outcome.detail
+    notice = RegistryNotice(kind="rollback", model="atp-winner", version="1", production_before="2",
+                            production_after="1", reason="S7", at="2026-11-18T10:05:00")  # fmt: skip
+    assert world.service.on_registry(notice).status == "silenced"
+    assert world.posted == [] and [a["delivery"] for a in world.service.recent()] == ["silenced", "silenced"]
+
+    now[0] += timedelta(minutes=31)  # échu : levé de lui-même
+    assert not world.service.silence_state().active
+    assert world.service.on_prefect(hook("ev-2")).status == "sent"  # un silence ne compte pas comme un envoi
+
+
+def test_silence_over_http(tmp_path: Path) -> None:
+    world = World(tmp_path, failed(), teams_events=("echec",))
+    client = TestClient(create_app(world.service))
+    body = client.post("/silence", json={"minutes": 20, "reason": "make scenarios"}).json()
+    assert body["active"] and body["reason"] == "make scenarios"
+    assert client.get("/health").json()["silence"]["active"]
+    assert client.post("/silence", json={"minutes": 0}).status_code == 422
+    assert client.post("/silence", json={"minutes": 10_000}).status_code == 422
+    assert client.delete("/silence").json() == {"active": False, "until": None, "reason": ""}
+    response = client.post("/prefect", json={"event_id": "ev-9", "event": "prefect.flow-run.Failed",
+                                             "flow_run_id": RUN_ID})  # fmt: skip
+    assert response.json()["status"] == "sent"

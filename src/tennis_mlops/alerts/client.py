@@ -29,6 +29,7 @@ class Notification:
             "sent": "carte envoyée sur Teams",
             "filtered": "gardée dans l'historique (type absent de teams_events)",
             "disabled": "gardée dans l'historique (aucun webhook Teams)",
+            "silenced": "gardée dans l'historique (mode silence des tests d'acceptation)",
             "duplicate": "déjà notifiée",
             "ignored": "pas d'alerte pour cette décision",
         }

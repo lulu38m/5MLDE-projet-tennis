@@ -26,7 +26,7 @@ EXIT_SENT, EXIT_FAILED, EXIT_NOT_CONFIGURED = 0, 1, 2
 PREVIEW_DIR = PROJECT_ROOT / "state" / "alerts"
 SINK_PORT = 8090
 DELIVERY_LABELS = {"sent": "envoyée", "filtered": "filtrée", "repeated": "répétée", "disabled": "sans webhook",
-                   "failed": "ÉCHEC"}  # fmt: skip
+                   "silenced": "en silence", "failed": "ÉCHEC"}  # fmt: skip
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:

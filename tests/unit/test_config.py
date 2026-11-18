@@ -35,7 +35,7 @@ def test_default_config_file_is_valid() -> None:
     config = ProjectConfig.from_yaml(DEFAULT_CONFIG_PATH)
     assert config.data.sources[0].kind is SourceKind.HUGGINGFACE
     assert config.data.sources[0].repo == "Aneeshers/tennis-sackmann-archive"
-    assert config.simulation.replay_start.year == 2015
+    assert config.simulation.replay_start.year == 2016
 
 
 def test_source_defaults_and_name(tmp_path: Path) -> None:

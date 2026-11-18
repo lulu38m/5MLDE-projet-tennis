@@ -1,0 +1,37 @@
+{
+  "scenario": {
+    "name": "ramp-batch",
+    "config": "B",
+    "users": "batch",
+    "steps": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ],
+    "step_s": 60.0,
+    "warmup_s": 15.0,
+    "base": null,
+    "factor": 5,
+    "ramp_s": 10,
+    "before_s": 60,
+    "during_s": 90,
+    "after_s": 120,
+    "constant": null,
+    "duration_s": 900
+  },
+  "kind": "ramp",
+  "t0": 1794917913.683,
+  "requests": 1732,
+  "capacity": {
+    "users": 10,
+    "rps": 7.866666666666666,
+    "p95_ms": 658.3854999999995,
+    "first_failure": 20
+  },
+  "spike": null,
+  "leak": null,
+  "longest_pause_s": 1.6299998760223389,
+  "interrupted": false
+}

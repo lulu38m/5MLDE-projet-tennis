@@ -1,0 +1,31 @@
+{
+  "scenario": {
+    "name": "endurance",
+    "config": "B",
+    "users": "mix",
+    "steps": null,
+    "step_s": 120,
+    "warmup_s": 60.0,
+    "base": null,
+    "factor": 5,
+    "ramp_s": 10,
+    "before_s": 60,
+    "during_s": 90,
+    "after_s": 120,
+    "constant": 50,
+    "duration_s": 900.0
+  },
+  "kind": "endurance",
+  "t0": 1794921035.73,
+  "requests": 43898,
+  "capacity": null,
+  "spike": null,
+  "leak": {
+    "start_mb": 1037.12768,
+    "end_mb": 1035.685888,
+    "slope_mb_per_10min": -1.1418675239829634,
+    "suspected": false
+  },
+  "longest_pause_s": 0.9259998798370361,
+  "interrupted": false
+}

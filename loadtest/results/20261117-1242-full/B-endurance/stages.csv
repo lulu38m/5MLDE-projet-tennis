@@ -1,0 +1,2 @@
+stage,label,users,start,measure_from,end,requests,rps,ok_rps,error_rate,p50_ms,p95_ms,p99_ms,mean_ms,max_ms,batches,batch_p95_ms,slo_ok,api_cpu_cores,postgres_cpu_cores,api_memory_mb,postgres_memory_mb,locust_cpu_cores
+1,50 utilisateurs,50,0,60,900,41133,48.97,48.97,0,5.93,58.81,231.4,16.06,1475,2034,295.6,True,0.4022,0.02233,1038,283.8,0.03563

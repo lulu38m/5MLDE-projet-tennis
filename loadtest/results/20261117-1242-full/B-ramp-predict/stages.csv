@@ -1,0 +1,6 @@
+stage,label,users,start,measure_from,end,requests,rps,ok_rps,error_rate,p50_ms,p95_ms,p99_ms,mean_ms,max_ms,batches,batch_p95_ms,slo_ok,api_cpu_cores,postgres_cpu_cores,api_memory_mb,postgres_memory_mb,locust_cpu_cores
+1,10 utilisateurs,10,0,15,60,450,10,10,0,11.84,27.7,46.65,13.61,83.85,0,,True,0.145,0.0208,912.7,256,0.01368
+2,50 utilisateurs,50,60,75,120,2263,50.29,50.29,0,6.3,14.78,25.12,8.828,339.2,0,,True,0.321,0.01408,916.6,255.9,0.03227
+3,100 utilisateurs,100,120,135,180,4420,98.22,98.22,0,5.61,43.42,368.1,18.48,589.6,0,,True,0.4995,0.01442,924.2,256.3,0.04987
+4,200 utilisateurs,200,180,195,240,7155,159,159,0,21.17,1270,1707,243.8,1981,0,,False,0.9314,0.02173,939.1,258.9,0.06935
+5,500 utilisateurs,500,240,255,300,4894,108.8,106.5,0.02043,3200,6600,1e+04,3856,1.031e+04,0,,False,0.9618,0.03149,971,259.2,0.06727

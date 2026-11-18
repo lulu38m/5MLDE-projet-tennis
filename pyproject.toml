@@ -28,12 +28,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "locust==2.47.0",
     "mypy==2.4.1",
     "pandas-stubs==2.2.3.250527",
     "pre-commit==4.7.0",
     "pytest==9.2.0",
     "pytest-cov==7.1.0",
     "ruff==0.17.3",
+    "types-psutil==7.2.2.20261111",
     "types-pyyaml==6.0.12.20261103",
 ]
 
@@ -45,7 +47,7 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "loadtest"]
 
 [tool.ruff.lint]
 select = [
@@ -76,13 +78,19 @@ convention = "google"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "loadtest"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 # GX et Prefect exposent leurs classes publiques sans les réexporter explicitement.
 module = ["great_expectations.*", "prefect.*"]
 implicit_reexport = true
+
+[[tool.mypy.overrides]]
+# Locust n'annote ni ses décorateurs d'événements ni LoadTestShape.
+module = ["loadtest.locustfile", "loadtest.shape"]
+disallow_untyped_decorators = false
+disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
 # scikit-learn et skops ne publient pas d'annotations de types (ni stubs ni py.typed).
@@ -101,6 +109,7 @@ addopts = "-ra --strict-markers"
 filterwarnings = [
     # Bruit de dépendances tierces, sans lien avec notre code :
     "ignore:.*deprecated - use:DeprecationWarning",                     # pyparsing, via matplotlib
+    "ignore:.*argument is deprecated, use:DeprecationWarning",          # pyparsing 3.3, via matplotlib
     "ignore:Unknown solver options:scipy.optimize.OptimizeWarning",     # scikit-learn 1.6 avec SciPy 1.18
     "ignore:starlette.middleware.wsgi is deprecated:DeprecationWarning", # serveur MLflow
 ]

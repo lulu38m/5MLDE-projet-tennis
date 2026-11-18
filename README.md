@@ -71,6 +71,8 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `make grafana` / `make prometheus` | Ouvre les dashboards (http://127.0.0.1:3001, sans compte) / les cibles de Prometheus |
 | `make grafana-check` | Vérifie les cibles Prometheus, les sources Grafana et chaque requête de chaque dashboard |
 | `make dashboards` | Régénère les JSON des dashboards depuis leur code (`monitoring/dashboards.py`) |
+| `make load` / `make load-full` | Campagne de charge courte (~6 min) / complète (~75 min, configs A, B, C) : rapport, CSV, graphiques |
+| `make load-ui` | Locust avec son interface web (http://127.0.0.1:8089) |
 
 ## Organisation du code
 
@@ -89,10 +91,11 @@ make ui-open    # l'interface de test : deux joueurs, une surface → leur proba
 | `src/tennis_mlops/ui/` | Interface web de test (Streamlit) : ne parle qu'à l'API |
 | `src/tennis_mlops/monitoring/` | Exporteur Prometheus de la chaîne, dashboards Grafana en code, `make grafana-check` |
 | `infra/` | Configuration de Prometheus et provisioning de Grafana (sources, dashboards générés) |
+| `loadtest/` | Tests de charge : scénarios Locust, campagne automatisée, configurations A/B/C, résultats |
 | `src/mock_source/` | Simulateur de source : API FastAPI de rejeu ATP avec horloge simulée et chaos |
 | `configs/` | Configuration de l'expérience (YAML, versionnée) |
 | `tests/` | Tests unitaires (`unit/`) puis d'intégration (`integration/`, marqueur `integration`) |
-| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md` |
+| `docs/` | `DONNEES.md` (provenance, licence), `MOCK_SOURCE.md` (rejeu), `INGESTION.md` (contrôles), `ENTRAINEMENT.md`, `TAGGING.md` (registre, mise en service, rollback), `ORCHESTRATION.md`, `ALERTES.md`, `API.md`, `UI.md`, `MONITORING.md`, `CHARGE.md`, `SYNTHESE_OPS.md` (dimensionnement) |
 | `Dockerfile`, `compose.yml` | Image unique du projet et stack locale (ports publiés sur 127.0.0.1 uniquement) |
 | `.env.example` | Variables d'environnement (URLs, secrets) — copier en `.env`, jamais commité |
 
@@ -252,3 +255,16 @@ Les incidents et décisions de `pipeline_events` y sont posés en annotations (r
 exporteur ajoute ce que l'API ne mesure pas : CPU et mémoire de chaque conteneur (API Docker), santé des services,
 horloge simulée, mode d'incident de la source, runs Prefect. `make grafana-check` fait exécuter chaque requête par
 Grafana. Détails : [`docs/MONITORING.md`](docs/MONITORING.md).
+
+## Tests de charge
+
+Locust contre l'API, sur la même machine que la stack (MacBook Pro M5 16 Go, 10 CPU et 7,7 Go pour Docker). Une
+campagne automatisée (`make load-full`) compare trois configurations de l'API (A : 0,5 CPU, 1 worker ; B : 1 CPU,
+2 workers ; C : 2 × B derrière nginx) sur une rampe de 10 à 1 000 utilisateurs, puis mesure un pic soudain (×5 en
+10 s) et 15 min d'endurance. Un palier est tenu si le p95 reste sous 200 ms et les erreurs sous 1 %.
+
+Résultat : **B tient 50 utilisateurs simultanés (49 req/s, p95 51 ms), C en tient 100 (98 req/s, p95 47 ms)**, A
+seulement 10 ; le CPU de l'API est le goulot, un réplica de plus double la capacité, pas de fuite mémoire en 15 min,
+retour à la normale 60 s après un pic ×5. Recommandation : C par défaut, +1 réplica par tranche de 50 utilisateurs,
+4 au plus sur notre Mac. Protocole : [`docs/CHARGE.md`](docs/CHARGE.md) ; chiffres et graphiques :
+[`docs/SYNTHESE_OPS.md`](docs/SYNTHESE_OPS.md).

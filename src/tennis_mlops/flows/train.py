@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import resource
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -686,7 +685,17 @@ def _players(frame: pd.DataFrame) -> int:
 
 
 def peak_rss_mb() -> float:
-    """Mémoire résidente maximale du processus (Mo) ; macOS compte en octets, Linux en kilo-octets."""
+    """Mémoire résidente maximale du processus (Mo) ; macOS compte en octets, Linux en kilo-octets.
+
+    `resource` n'existe pas sous Windows : importé ici, pas en tête, pour que le module reste importable depuis
+    l'hôte (`uv run tennis scenarios` charge les déploiements) ; l'entraînement, lui, tourne dans le worker Linux.
+    """
+    if sys.platform == "win32":
+        import psutil
+
+        return float(psutil.Process().memory_info().peak_wset) / (1024 * 1024)
+    import resource
+
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
 

@@ -98,3 +98,8 @@ def test_commands_forward_to_the_project_modules(project: Path, capsys: pytest.C
         "docker compose down",
     ]
     assert main(["report"], cli) == 1 and "uv run tennis scenarios" in capsys.readouterr().out
+
+
+def test_project_prefect_url_wins_over_a_global_one(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PREFECT_API_URL", "http://localhost:4200/api")  # laissé par les TP dans l'environnement
+    assert Cli(project, Recorder(), print).env()["PREFECT_API_URL"].endswith(":4201/api")

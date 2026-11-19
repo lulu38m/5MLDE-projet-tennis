@@ -489,8 +489,9 @@ def check_readable(raw_dir: Path, names: Sequence[str]) -> None:
     """Échoue avec un message actionnable si des fichiers de données ne sont pas lisibles par ce processus."""
     unreadable = [n for n in names if (raw_dir / n).exists() and not os.access(raw_dir / n, os.R_OK)]
     if unreadable:
+        uid = getattr(os, "getuid", lambda: "?")()  # pas d'uid sous Windows
         msg = (
-            f"{len(unreadable)} fichier(s) de {raw_dir} illisible(s) par l'utilisateur uid={os.getuid()} "
+            f"{len(unreadable)} fichier(s) de {raw_dir} illisible(s) par l'utilisateur uid={uid} "
             f"(ex. {unreadable[0]}). Sur la machine hôte : `make data` (rétablit les droits) "
             "ou `chmod a+r data/raw/*`, puis relancer."
         )

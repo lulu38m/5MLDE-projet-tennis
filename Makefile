@@ -31,7 +31,8 @@ UI_URL ?= http://127.0.0.1:8501
 GRAFANA_URL ?= http://127.0.0.1:3001
 PROMETHEUS_URL ?= http://127.0.0.1:9091
 # Les flows lancés depuis la machine hôte s'enregistrent dans le serveur Prefect de la stack.
-PREFECT_API_URL ?= http://127.0.0.1:4201/api
+# `:=` et non `?=` : un PREFECT_API_URL global (TP : localhost:4200) ne doit pas détourner les flows de la stack.
+PREFECT_API_URL := $(or $(TENNIS_PREFECT_API_URL),http://127.0.0.1:4201/api)
 export PREFECT_API_URL
 # Pas de « conseils pour agents » de MLflow dans les logs.
 export MLFLOW_DISABLE_AGENT_HINT := 1

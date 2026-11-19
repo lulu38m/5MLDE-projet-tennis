@@ -27,7 +27,7 @@ def configure_environment(settings: Settings) -> None:
     les étapes vérifiées : les incidents provoqués exprès (lot refusé, source en panne) y écriraient sinon des
     traces d'erreur qui sont justement le comportement attendu.
     """
-    os.environ.setdefault("PREFECT_API_URL", str(settings.prefect_api_url))
+    os.environ["PREFECT_API_URL"] = str(settings.prefect_api_url)  # pas un PREFECT_API_URL global hérité
     os.environ.setdefault("PREFECT_LOGGING_HANDLERS_CONSOLE_LEVEL", "CRITICAL")
     os.environ.setdefault("PREFECT_LOGGING_HANDLERS_CONSOLE_FLOW_RUNS_LEVEL", "CRITICAL")
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")

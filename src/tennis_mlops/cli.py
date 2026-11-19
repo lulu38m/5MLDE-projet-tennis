@@ -57,10 +57,11 @@ class Cli:
         if hasattr(os, "getuid"):  # macOS, Linux : le worker écrit dans ./state sous l'identité de l'hôte
             env.setdefault("HOST_UID", str(os.getuid()))
             env.setdefault("HOST_GID", str(os.getgid()))
-        if "PREFECT_API_URL" not in env:
-            from tennis_mlops.config import Settings
+        # Toujours le serveur de la stack (réglage du projet) : un PREFECT_API_URL global hérité d'un autre projet
+        # (TP : localhost:4200) enverrait sinon les flows vers un serveur absent.
+        from tennis_mlops.config import Settings
 
-            env["PREFECT_API_URL"] = str(Settings(_env_file=self.root / ".env").prefect_api_url)
+        env["PREFECT_API_URL"] = str(Settings(_env_file=self.root / ".env").prefect_api_url)
         return env
 
     def call(self, command: Sequence[str], env: Mapping[str, str] | None = None) -> int:
